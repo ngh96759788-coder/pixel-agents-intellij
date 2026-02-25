@@ -1,0 +1,25 @@
+<idea-plugin>
+    <id>com.pixelagents.intellij</id>
+    <name>Pixel Agents</name>
+    <vendor url="https://github.com/pablodelucca/pixel-agents">pixelagents</vendor>
+    <description><![CDATA[
+        Pixel art office where your Claude Code terminal sessions are animated characters.
+        Watch your AI agents come to life as they work on your code.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.plugins.terminal</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Pixel Agents"
+                    anchor="bottom"
+                    secondary="true"
+                    canCloseContents="false"
+                    factoryClass="com.pixelagents.intellij.PixelAgentsToolWindowFactory"
+                    icon="/icons/pixelAgents.svg"/>
+        <applicationService
+            serviceImplementation="com.pixelagents.intellij.PixelAgentsSettings"/>
+        <notificationGroup id="Pixel Agents"
+                           displayType="BALLOON"/>
+    </extensions>
+</idea-plugin>

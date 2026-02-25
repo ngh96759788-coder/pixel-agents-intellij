@@ -1,0 +1,16 @@
+out
+dist
+node_modules
+.vscode-test/
+*.vsix
+.claude/
+/logs
+/sprites-export
+.env
+
+# IntelliJ / Gradle
+.idea/
+build/
+.gradle/
+.intellijPlatform/
+*.iml

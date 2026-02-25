@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 13 13">
+  <!-- Hair -->
+  <rect x="4" y="0" width="5" height="1" fill="#8B6914"/>
+  <rect x="3" y="1" width="7" height="2" fill="#8B6914"/>
+  <!-- Face -->
+  <rect x="4" y="3" width="5" height="3" fill="#E8C298"/>
+  <!-- Eyes -->
+  <rect x="5" y="3" width="1" height="1" fill="#2B2B2B"/>
+  <rect x="7" y="3" width="1" height="1" fill="#2B2B2B"/>
+  <!-- Body -->
+  <rect x="3" y="6" width="7" height="3" fill="#5A8CFF"/>
+  <!-- Arms -->
+  <rect x="2" y="6" width="1" height="2" fill="#5A8CFF"/>
+  <rect x="10" y="6" width="1" height="2" fill="#5A8CFF"/>
+  <!-- Desk -->
+  <rect x="1" y="9" width="11" height="1" fill="#A0784A"/>
+  <!-- Monitor -->
+  <rect x="4" y="7" width="5" height="2" fill="#4A4A6A"/>
+  <rect x="5" y="8" width="3" height="1" fill="#7AC8E8"/>
+  <!-- Legs -->
+  <rect x="4" y="10" width="2" height="2" fill="#4A4A6A"/>
+  <rect x="7" y="10" width="2" height="2" fill="#4A4A6A"/>
+</svg>

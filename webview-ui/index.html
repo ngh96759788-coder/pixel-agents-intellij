@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>webview-ui</title>
+    <script>
+      // JCEF DPR diagnostic + conditional override.
+      (function() {
+        var nativeDpr = window.devicePixelRatio;
+        var urlDpr = parseFloat(new URLSearchParams(location.search).get('dpr'));
+        console.log('[PixelAgents DPR] native=' + nativeDpr + ', urlParam=' + urlDpr + ', screen=' + (window.screen.width) + 'x' + (window.screen.height));
+        // Only override if JCEF reports wrong DPR (differs from OS)
+        if (urlDpr > 0 && nativeDpr !== urlDpr) {
+          Object.defineProperty(window, 'devicePixelRatio', { get: function() { return urlDpr; } });
+          console.log('[PixelAgents DPR] overridden ' + nativeDpr + ' -> ' + urlDpr);
+        } else {
+          console.log('[PixelAgents DPR] native DPR matches OS, no override needed');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

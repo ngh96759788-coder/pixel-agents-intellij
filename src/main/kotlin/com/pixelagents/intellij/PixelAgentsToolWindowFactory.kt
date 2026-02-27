@@ -78,6 +78,7 @@ class PixelAgentsPanel(
     var activeAgentId: Int? = null
 
     private var webviewDir: File? = null
+    private var assetsDir: File? = null
 
     init {
         LOG.info("Initializing PixelAgentsPanel")
@@ -212,10 +213,16 @@ class PixelAgentsPanel(
                 settings.agentSeats = gson.toJson(seats)
             }
             "saveLayout" -> {
+                @Suppress("UNCHECKED_CAST")
                 val layout = message["layout"] as? Map<String, Any?>
                 if (layout != null) {
                     layoutPersistence.markOwnWrite()
                     layoutPersistence.writeLayoutToFile(layout)
+                    // Also save to theme-specific file
+                    val themeLayoutFile = Constants.THEME_LAYOUT_FILES[settings.theme]
+                    if (themeLayoutFile != null && themeLayoutFile != "layout.json") {
+                        layoutPersistence.writeThemeLayoutToFile(layout, themeLayoutFile)
+                    }
                 }
             }
             "setSoundEnabled" -> {
@@ -233,28 +240,100 @@ class PixelAgentsPanel(
                     bridge.sendToWebview(msgType, payload)
                 }
             }
+            "setTheme" -> {
+                val theme = message["theme"] as? String ?: Constants.THEME_DEFAULT
+                val validTheme = if (theme in Constants.VALID_THEMES) theme else Constants.THEME_DEFAULT
+                LOG.info("Theme changed to: $validTheme")
+                val previousTheme = settings.theme
+                settings.theme = validTheme
+                // Reload all themed assets on background thread
+                val dir = assetsDir
+                if (dir != null) {
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        // 1. Save current layout to previous theme's file
+                        val prevLayoutFile = Constants.THEME_LAYOUT_FILES[previousTheme] ?: "layout.json"
+                        val currentLayout = layoutPersistence.readThemeLayoutFromFile(prevLayoutFile)
+                            ?: layoutPersistence.readLayoutFromFile()
+                        if (currentLayout != null) {
+                            layoutPersistence.writeThemeLayoutToFile(currentLayout, prevLayoutFile)
+                        }
+
+                        // 2. Reload all themed assets
+                        val charSubdir = Constants.THEME_CHAR_DIRS[validTheme] ?: "characters"
+                        val floorFile = Constants.THEME_FLOOR_FILES[validTheme] ?: "floors.png"
+                        val wallFile = Constants.THEME_WALL_FILES[validTheme] ?: "walls.png"
+                        val furnitureDir = Constants.THEME_FURNITURE_DIRS[validTheme] ?: "furniture"
+
+                        val charSprites = assetLoader.loadCharacterSprites(dir, charSubdir)
+                        if (charSprites != null) {
+                            bridge.sendToWebview("characterSpritesLoaded", mapOf("characters" to charSprites, "theme" to validTheme))
+                        }
+
+                        val floorTiles = assetLoader.loadFloorTiles(dir, floorFile)
+                        if (floorTiles != null) {
+                            bridge.sendToWebview("floorTilesLoaded", mapOf("sprites" to floorTiles))
+                        }
+
+                        val wallTiles = assetLoader.loadWallTiles(dir, wallFile)
+                        if (wallTiles != null) {
+                            bridge.sendToWebview("wallTilesLoaded", mapOf("sprites" to wallTiles))
+                        }
+
+                        val furniture = assetLoader.loadFurnitureAssets(dir, furnitureDir)
+                        if (furniture != null) {
+                            bridge.sendToWebview("furnitureAssetsLoaded", furniture)
+                        }
+
+                        // 3. Load theme layout (user-saved -> bundled default)
+                        val themeLayoutFile = Constants.THEME_LAYOUT_FILES[validTheme] ?: "layout.json"
+                        var themeLayout = layoutPersistence.readThemeLayoutFromFile(themeLayoutFile)
+                        if (themeLayout == null) {
+                            val defaultLayoutFile = Constants.THEME_DEFAULT_LAYOUTS[validTheme] ?: "default-layout.json"
+                            themeLayout = assetLoader.loadDefaultLayout(dir, defaultLayoutFile)
+                            if (themeLayout != null) {
+                                layoutPersistence.writeThemeLayoutToFile(themeLayout, themeLayoutFile)
+                            }
+                        }
+
+                        // 4. Write to main layout.json for watcher sync
+                        if (themeLayout != null) {
+                            layoutPersistence.markOwnWrite()
+                            layoutPersistence.writeLayoutToFile(themeLayout)
+                        }
+
+                        // 5. Send layout + themeChanged to webview
+                        if (themeLayout != null) {
+                            bridge.sendToWebview("layoutLoaded", mapOf("layout" to themeLayout))
+                        }
+                        bridge.sendToWebview("themeChanged", mapOf("theme" to validTheme))
+                    }
+                }
+            }
         }
     }
 
     private fun onWebviewReady() {
         // 1. Send settings
-        bridge.sendToWebview("settingsLoaded", mapOf("soundEnabled" to settings.soundEnabled))
+        bridge.sendToWebview("settingsLoaded", mapOf(
+            "soundEnabled" to settings.soundEnabled,
+            "theme" to settings.theme,
+        ))
 
-        // 2. Restore agents
-        agentManager.restoreAgents()
+        // 2. Start fresh — don't restore persisted agents. Characters appear
+        //    only when "+" is clicked or Claude terminal activity is detected.
 
         // 3. Load and send assets (on background thread)
         ApplicationManager.getApplication().executeOnPooledThread {
             loadAndSendAssets()
         }
 
-        // 4. Start project scan
+        // 4. Start project scan (detects running Claude terminals)
         val projectDir = agentManager.getProjectDirPath()
         if (projectDir != null) {
             fileWatcher.ensureProjectScan(projectDir)
         }
 
-        // 5. Send existing agents
+        // 5. Send existing agents (empty on fresh start; fileWatcher may adopt running terminals)
         agentManager.sendExistingAgents()
 
         // 6. Start layout watcher
@@ -265,9 +344,17 @@ class PixelAgentsPanel(
 
     private fun loadAndSendAssets() {
         // Find assets directory
-        val assetsDir = findAssetsDirectory()
-        if (assetsDir != null) {
-            assetLoader.loadAllAssets(assetsDir) { type, payload ->
+        val dir = findAssetsDirectory()
+        this.assetsDir = dir
+        if (dir != null) {
+            // Load with themed assets
+            val currentTheme = settings.theme
+            val charSubdir = Constants.THEME_CHAR_DIRS[currentTheme] ?: "characters"
+            val floorFile = Constants.THEME_FLOOR_FILES[currentTheme] ?: "floors.png"
+            val wallFile = Constants.THEME_WALL_FILES[currentTheme] ?: "walls.png"
+            val furnitureDir = Constants.THEME_FURNITURE_DIRS[currentTheme] ?: "furniture"
+            val defaultLayoutFile = Constants.THEME_DEFAULT_LAYOUTS[currentTheme] ?: "default-layout.json"
+            assetLoader.loadAllAssets(dir, charSubdir, floorFile, wallFile, currentTheme, furnitureDir, defaultLayoutFile) { type, payload ->
                 bridge.sendToWebview(type, payload)
             }
         }

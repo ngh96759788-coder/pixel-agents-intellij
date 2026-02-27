@@ -8,7 +8,7 @@ import { setFloorSprites } from '../office/floorTiles.js'
 import { setWallSprites } from '../office/wallTiles.js'
 import { setCharacterTemplates } from '../office/sprites/spriteData.js'
 import { vscode } from '../vscodeApi.js'
-import { playDoneSound, setSoundEnabled } from '../notificationSound.js'
+import { playDoneSound, playSpawnSound, playDespawnSound, playThemeSwitchSound, setSoundEnabled } from '../notificationSound.js'
 
 export interface SubagentCharacter {
   id: number
@@ -44,6 +44,7 @@ export interface ExtensionMessageState {
   subagentCharacters: SubagentCharacter[]
   layoutReady: boolean
   loadedAssets?: { catalog: FurnitureAsset[]; sprites: Record<string, string[][]> }
+  currentTheme: string
 }
 
 function saveAgentSeats(os: OfficeState): void {
@@ -68,6 +69,7 @@ export function useExtensionMessages(
   const [subagentCharacters, setSubagentCharacters] = useState<SubagentCharacter[]>([])
   const [layoutReady, setLayoutReady] = useState(false)
   const [loadedAssets, setLoadedAssets] = useState<{ catalog: FurnitureAsset[]; sprites: Record<string, string[][]> } | undefined>()
+  const [currentTheme, setCurrentTheme] = useState('default')
 
   // Track whether initial layout has been loaded (ref to avoid re-render)
   const layoutReadyRef = useRef(false)
@@ -111,6 +113,7 @@ export function useExtensionMessages(
         setSelectedAgent(id)
         os.addAgent(id)
         saveAgentSeats(os)
+        playSpawnSound()
       } else if (msg.type === 'agentClosed') {
         const id = msg.id as number
         setAgents((prev) => prev.filter((a) => a !== id))
@@ -137,6 +140,7 @@ export function useExtensionMessages(
         os.removeAllSubagents(id)
         setSubagentCharacters((prev) => prev.filter((s) => s.parentAgentId !== id))
         os.removeAgent(id)
+        playDespawnSound()
       } else if (msg.type === 'existingAgents') {
         const incoming = msg.agents as number[]
         const meta = (msg.agentMeta || {}) as Record<number, { palette?: number; hueShift?: number; seatId?: string }>
@@ -176,6 +180,7 @@ export function useExtensionMessages(
             if (prev.some((s) => s.id === subId)) return prev
             return [...prev, { id: subId, parentAgentId: id, parentToolId: toolId, label }]
           })
+          playSpawnSound()
         }
       } else if (msg.type === 'agentToolDone') {
         const id = msg.id as number
@@ -315,10 +320,18 @@ export function useExtensionMessages(
         // Remove sub-agent character
         os.removeSubagent(id, parentToolId)
         setSubagentCharacters((prev) => prev.filter((s) => !(s.parentAgentId === id && s.parentToolId === parentToolId)))
+        playDespawnSound()
       } else if (msg.type === 'characterSpritesLoaded') {
         const characters = msg.characters as Array<{ down: string[][][]; up: string[][][]; right: string[][][] }>
         console.log(`[Webview] Received ${characters.length} pre-colored character sprites`)
         setCharacterTemplates(characters)
+        // Force all existing characters to refresh their cached sprites
+        os.refreshCharacterSprites()
+        // Update theme (characterSpritesLoaded fires on theme change)
+        if (msg.theme) {
+          const theme = msg.theme as string
+          setCurrentTheme(theme)
+        }
       } else if (msg.type === 'floorTilesLoaded') {
         const sprites = msg.sprites as string[][][]
         console.log(`[Webview] Received ${sprites.length} floor tile patterns`)
@@ -330,6 +343,10 @@ export function useExtensionMessages(
       } else if (msg.type === 'settingsLoaded') {
         const soundOn = msg.soundEnabled as boolean
         setSoundEnabled(soundOn)
+        if (msg.theme) {
+          const theme = msg.theme as string
+          setCurrentTheme(theme)
+        }
       } else if (msg.type === 'furnitureAssetsLoaded') {
         try {
           const catalog = msg.catalog as FurnitureAsset[]
@@ -341,6 +358,10 @@ export function useExtensionMessages(
         } catch (err) {
           console.error(`❌ Webview: Error processing furnitureAssetsLoaded:`, err)
         }
+      } else if (msg.type === 'themeChanged') {
+        const theme = msg.theme as string
+        setCurrentTheme(theme)
+        playThemeSwitchSound()
       }
     }
     window.addEventListener('message', handler)
@@ -348,5 +369,5 @@ export function useExtensionMessages(
     return () => window.removeEventListener('message', handler)
   }, [getOfficeState])
 
-  return { agents, selectedAgent, agentTools, agentStatuses, subagentTools, subagentCharacters, layoutReady, loadedAssets }
+  return { agents, selectedAgent, agentTools, agentStatuses, subagentTools, subagentCharacters, layoutReady, loadedAssets, currentTheme }
 }

@@ -34,4 +34,38 @@ object Constants {
 
     // Terminal
     const val TERMINAL_NAME_PREFIX = "Claude Code"
+
+    // Themes
+    const val THEME_DEFAULT = "default"
+    val VALID_THEMES = listOf("default", "alien", "zoo")
+    val THEME_CHAR_DIRS = mapOf(
+        "default" to "characters",
+        "alien" to "characters-alien",
+        "zoo" to "characters-zoo",
+    )
+    val THEME_FLOOR_FILES = mapOf(
+        "default" to "floors.png",
+        "alien" to "floors-alien.png",
+        "zoo" to "floors-zoo.png",
+    )
+    val THEME_WALL_FILES = mapOf(
+        "default" to "walls.png",
+        "alien" to "walls-alien.png",
+        "zoo" to "walls-zoo.png",
+    )
+    val THEME_FURNITURE_DIRS = mapOf(
+        "default" to "furniture",
+        "alien" to "furniture-alien",
+        "zoo" to "furniture",
+    )
+    val THEME_DEFAULT_LAYOUTS = mapOf(
+        "default" to "default-layout.json",
+        "alien" to "default-layout-alien.json",
+        "zoo" to "default-layout.json",
+    )
+    val THEME_LAYOUT_FILES = mapOf(
+        "default" to "layout.json",
+        "alien" to "layout-alien.json",
+        "zoo" to "layout-zoo.json",
+    )
 }

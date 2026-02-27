@@ -15,6 +15,7 @@ class PixelAgentsSettings : PersistentStateComponent<PixelAgentsSettings.State> 
         var persistedAgents: String? = null,
         var agentSeats: String? = null,
         var savedLayout: String? = null,
+        var theme: String = Constants.THEME_DEFAULT,
     )
 
     private var myState = State()
@@ -39,6 +40,10 @@ class PixelAgentsSettings : PersistentStateComponent<PixelAgentsSettings.State> 
     var savedLayout: String?
         get() = myState.savedLayout
         set(value) { myState.savedLayout = value }
+
+    var theme: String
+        get() = myState.theme
+        set(value) { myState.theme = value }
 
     companion object {
         fun getInstance(): PixelAgentsSettings =

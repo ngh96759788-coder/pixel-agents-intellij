@@ -7,16 +7,16 @@
 }
 
 :root {
-  --pixel-bg: #1e1e2e;
-  --pixel-border: #4a4a6a;
-  --pixel-border-light: #6a6a8a;
+  --pixel-bg: #1a1a2a;
+  --pixel-border: #5a5a7a;
+  --pixel-border-light: #7a7aaa;
   --pixel-accent: #5a8cff;
   --pixel-green: #5ac88c;
   --pixel-shadow: 2px 2px 0px #0a0a14;
 
   /* Button base */
-  --pixel-text: rgba(255, 255, 255, 0.8);
-  --pixel-text-dim: rgba(255, 255, 255, 0.7);
+  --pixel-text: rgba(255, 255, 255, 0.95);
+  --pixel-text-dim: rgba(255, 255, 255, 0.8);
   --pixel-btn-bg: rgba(255, 255, 255, 0.08);
   --pixel-btn-hover-bg: rgba(255, 255, 255, 0.15);
   --pixel-btn-disabled-opacity: 0.35;

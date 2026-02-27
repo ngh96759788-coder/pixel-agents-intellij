@@ -2733,87 +2733,521 @@
     null
   ],
   "furniture": [
-
-    {"uid":"w-clock-1","type":"WALL_CLOCK","col":1,"row":0},
-    {"uid":"w-board-2","type":"BOARD","col":4,"row":0},
-    {"uid":"w-note-3","type":"WALL_NOTE","col":5,"row":0},
-    {"uid":"w-graph-4","type":"WALL_GRAPH","col":8,"row":0},
-    {"uid":"w-note2-5","type":"WALL_NOTE_2","col":9,"row":0},
-
-    {"uid":"bs-tall-1","type":"TALL_BOOKSHELF","col":2,"row":0},
-    {"uid":"fc-wide-1","type":"WIDE_FILING_CABINET","col":6,"row":0},
-    {"uid":"fc-tall-1","type":"FILING_CABINET_TALL","col":10,"row":0},
-    {"uid":"bs-tall-2","type":"TALL_BOOKSHELF","col":12,"row":0},
-
-    {"uid":"plant-1","type":"SMALL_PLANT","col":1,"row":1},
-    {"uid":"plant-2","type":"SMALL_PLANT","col":5,"row":1},
-
-    {"uid":"desk-1","type":"DESK","col":2,"row":3},
-    {"uid":"chair-1","type":"CHAIR","col":2,"row":2},
-    {"uid":"chair-1b","type":"CHAIR_2","col":3,"row":5},
-    {"uid":"papers-1","type":"PAPERS","col":3,"row":3},
-    {"uid":"desk-2","type":"DESK_2","col":6,"row":3},
-    {"uid":"chair-2","type":"CHAIR","col":6,"row":2},
-    {"uid":"chair-2b","type":"CHAIR","col":8,"row":4},
-    {"uid":"folders-1","type":"FOLDERS","col":7,"row":3},
-
-    {"uid":"bin-1","type":"BIN","col":5,"row":6},
-    {"uid":"fc-small-1","type":"FILING_CABINET_SMALL","col":9,"row":1},
-
-    {"uid":"boss-desk","type":"BOSS_DESK","col":10,"row":5},
-    {"uid":"boss-chair","type":"BOSS_CHAIR","col":10,"row":4},
-
-    {"uid":"print-stand","type":"PRINTER_FURNITURE","col":12,"row":6},
-    {"uid":"printer-1","type":"PRINTER","col":13,"row":7},
-
-    {"uid":"desk-3","type":"DESK","col":2,"row":10},
-    {"uid":"chair-3","type":"CHAIR_2","col":2,"row":9},
-    {"uid":"chair-3b","type":"CHAIR","col":4,"row":11},
-    {"uid":"books-1","type":"BOOKS","col":3,"row":10},
-    {"uid":"desk-4","type":"DESK_2","col":6,"row":10},
-    {"uid":"chair-4","type":"CHAIR","col":6,"row":9},
-    {"uid":"chair-4b","type":"CHAIR_2","col":8,"row":11},
-    {"uid":"folders-2","type":"FOLDERS_2","col":7,"row":10},
-
-    {"uid":"bin-2","type":"BIN","col":9,"row":13},
-    {"uid":"fc-small-2","type":"FILING_CABINET_SMALL","col":12,"row":9},
-    {"uid":"plant-3","type":"BIG_PLANT","col":1,"row":14},
-    {"uid":"bookshelf-1","type":"BOOKSHELF","col":12,"row":14},
-
-    {"uid":"w-board-m1","type":"BOARD","col":16,"row":0},
-    {"uid":"w-note-m2","type":"WALL_NOTE_2","col":15,"row":0},
-    {"uid":"w-shelf-m3","type":"WALL_SHELF","col":19,"row":0},
-
-    {"uid":"fc-small-m1","type":"FILING_CABINET_SMALL","col":15,"row":1},
-    {"uid":"plant-m1","type":"SMALL_PLANT","col":19,"row":1},
-    {"uid":"mtg-table","type":"BIG_ROUND_TABLE","col":16,"row":3},
-    {"uid":"mtg-ch1","type":"BOSS_CHAIR","col":16,"row":2},
-    {"uid":"mtg-ch2","type":"CHAIR","col":18,"row":3},
-    {"uid":"mtg-ch3","type":"CHAIR_2","col":16,"row":5},
-    {"uid":"mtg-ch4","type":"CHAIR","col":15,"row":4},
-
-    {"uid":"sofa-1","type":"BIG_SOFA","col":15,"row":12},
-    {"uid":"sofa-table","type":"SMALL_TABLE","col":17,"row":13},
-    {"uid":"sofa-2","type":"SMALL_SOFA","col":18,"row":12},
-    {"uid":"plant-l1","type":"BIG_PLANT","col":15,"row":15},
-    {"uid":"bookshelf-l1","type":"BOOKSHELF","col":19,"row":11},
-    {"uid":"plant-l2","type":"SMALL_PLANT","col":19,"row":15},
-
-    {"uid":"vending-1","type":"VENDING_MACHINE","col":21,"row":0},
-    {"uid":"water-1","type":"WATER_DISPENSER","col":23,"row":0},
-
-    {"uid":"fc-small-b1","type":"FILING_CABINET_SMALL","col":21,"row":3},
-    {"uid":"plant-b1","type":"SMALL_PLANT","col":24,"row":3},
-
-    {"uid":"break-desk","type":"DESK_2","col":21,"row":7},
-    {"uid":"coffee-1","type":"COFFEE_MACHINE","col":22,"row":7},
-    {"uid":"break-ch1","type":"CHAIR","col":22,"row":6},
-    {"uid":"break-ch2","type":"CHAIR_2","col":23,"row":8},
-
-    {"uid":"break-table","type":"SMALL_TABLE","col":21,"row":12},
-    {"uid":"break-ch3","type":"CHAIR","col":21,"row":11},
-    {"uid":"break-ch4","type":"CHAIR_2","col":22,"row":13},
-    {"uid":"plant-b2","type":"SMALL_PLANT","col":24,"row":11},
-    {"uid":"bin-b1","type":"BIN","col":24,"row":16}
+    {
+      "type": "TALL_BOOKSHELF",
+      "row": 0,
+      "col": 2,
+      "uid": "bs-tall-1"
+    },
+    {
+      "type": "WIDE_FILING_CABINET",
+      "row": 0,
+      "col": 5,
+      "uid": "fc-wide-1"
+    },
+    {
+      "type": "WALL_CLOCK",
+      "row": 0,
+      "col": 1,
+      "uid": "w-clock-1"
+    },
+    {
+      "type": "BOARD",
+      "row": 0,
+      "col": 4,
+      "uid": "w-board-1"
+    },
+    {
+      "type": "WALL_NOTE",
+      "row": 0,
+      "col": 8,
+      "uid": "w-note-1"
+    },
+    {
+      "type": "WALL_GRAPH",
+      "row": 0,
+      "col": 10,
+      "uid": "w-graph-1"
+    },
+    {
+      "type": "FILING_CABINET_TALL_SIDE",
+      "row": 0,
+      "col": 12,
+      "uid": "fc-tall-l1"
+    },
+    {
+      "type": "BIG_FILING_CABINET_SIDE",
+      "row": 3,
+      "col": 12,
+      "uid": "fc-big-l1"
+    },
+    {
+      "type": "WIDE_FILING_CABINET_SIDE",
+      "row": 6,
+      "col": 12,
+      "uid": "fc-wide-l1"
+    },
+    {
+      "type": "FILING_CABINET_OPEN_SIDE",
+      "row": 9,
+      "col": 12,
+      "uid": "fc-open-l1"
+    },
+    {
+      "type": "SMALL_PLANT",
+      "row": 1,
+      "col": 1,
+      "uid": "plant-1"
+    },
+    {
+      "type": "SMALL_PLANT",
+      "row": 1,
+      "col": 7,
+      "uid": "plant-2"
+    },
+    {
+      "type": "DESK_BACK",
+      "row": 3,
+      "col": 2,
+      "uid": "desk-1"
+    },
+    {
+      "type": "CHAIR_BIG",
+      "row": 3,
+      "col": 2,
+      "uid": "chair-1"
+    },
+    {
+      "type": "DESK_2_BACK",
+      "row": 3,
+      "col": 5,
+      "uid": "desk-2"
+    },
+    {
+      "type": "CHAIR_2_BIG",
+      "row": 3,
+      "col": 5,
+      "uid": "chair-2"
+    },
+    {
+      "type": "DESK_BACK",
+      "row": 3,
+      "col": 8,
+      "uid": "desk-3"
+    },
+    {
+      "type": "CHAIR_BIG",
+      "row": 3,
+      "col": 8,
+      "uid": "chair-3"
+    },
+    {
+      "type": "BIG_OFFICE_PRINTER",
+      "row": 5,
+      "col": 10,
+      "uid": "big-printer"
+    },
+    {
+      "type": "BIG_PLANT",
+      "row": 5,
+      "col": 1,
+      "uid": "plant-big-1"
+    },
+    {
+      "type": "BIN",
+      "row": 7,
+      "col": 10,
+      "uid": "bin-1"
+    },
+    {
+      "type": "DESK_2_BACK",
+      "row": 9,
+      "col": 2,
+      "uid": "desk-4"
+    },
+    {
+      "type": "CHAIR_BIG",
+      "row": 9,
+      "col": 2,
+      "uid": "chair-4"
+    },
+    {
+      "type": "DESK_BACK",
+      "row": 9,
+      "col": 5,
+      "uid": "desk-5"
+    },
+    {
+      "type": "CHAIR_2_BIG",
+      "row": 9,
+      "col": 5,
+      "uid": "chair-5"
+    },
+    {
+      "type": "DESK_2_BACK",
+      "row": 9,
+      "col": 8,
+      "uid": "desk-6"
+    },
+    {
+      "type": "CHAIR_BIG",
+      "row": 9,
+      "col": 8,
+      "uid": "chair-6"
+    },
+    {
+      "type": "BOSS_DESK_BACK",
+      "row": 13,
+      "col": 4,
+      "uid": "boss-desk-1"
+    },
+    {
+      "type": "BOSS_CHAIR",
+      "row": 13,
+      "col": 4,
+      "uid": "boss-chair-1"
+    },
+    {
+      "type": "BIG_PLANT",
+      "row": 13,
+      "col": 1,
+      "uid": "plant-big-2"
+    },
+    {
+      "type": "SMALL_PLANT",
+      "row": 14,
+      "col": 11,
+      "uid": "plant-sm-1"
+    },
+    {
+      "type": "BIN",
+      "row": 11,
+      "col": 1,
+      "uid": "bin-2"
+    },
+    {
+      "type": "BOOKSHELF_LEFT",
+      "row": 12,
+      "col": 13,
+      "uid": "bs-left-1"
+    },
+    {
+      "type": "BOARD",
+      "row": 0,
+      "col": 16,
+      "uid": "w-board-m1"
+    },
+    {
+      "type": "WALL_SHELF",
+      "row": 0,
+      "col": 18,
+      "uid": "w-shelf-m1"
+    },
+    {
+      "type": "MIRROR",
+      "row": 0,
+      "col": 15,
+      "uid": "w-mirror-m1"
+    },
+    {
+      "type": "BIG_ROUND_TABLE",
+      "row": 4,
+      "col": 16,
+      "uid": "mtg-table"
+    },
+    {
+      "type": "CHAIR_2",
+      "row": 3.5,
+      "col": 16.5,
+      "uid": "mtg-ch1",
+      "color": {
+        "h": -125,
+        "s": 20,
+        "b": 0,
+        "c": 0
+      }
+    },
+    {
+      "type": "CHAIR_2_BACK",
+      "row": 6,
+      "col": 16.5,
+      "uid": "mtg-ch2",
+      "color": {
+        "h": -125,
+        "s": 20,
+        "b": 0,
+        "c": 0
+      }
+    },
+    {
+      "type": "CHAIR_2_RIGHT",
+      "row": 5,
+      "col": 15,
+      "uid": "mtg-ch3",
+      "color": {
+        "h": -125,
+        "s": 20,
+        "b": 0,
+        "c": 0
+      }
+    },
+    {
+      "type": "CHAIR_2_LEFT",
+      "row": 5,
+      "col": 18,
+      "uid": "mtg-ch4",
+      "color": {
+        "h": -125,
+        "s": 20,
+        "b": 0,
+        "c": 0
+      }
+    },
+    {
+      "type": "SMALL_PLANT",
+      "row": 1,
+      "col": 19,
+      "uid": "plant-m1"
+    },
+    {
+      "type": "SMALL_PLANT",
+      "row": 1,
+      "col": 15,
+      "uid": "plant-m2"
+    },
+    {
+      "type": "VENDING_MACHINE",
+      "row": 0,
+      "col": 21,
+      "uid": "vending-1"
+    },
+    {
+      "type": "WATER_DISPENSER",
+      "row": 0,
+      "col": 23,
+      "uid": "water-1"
+    },
+    {
+      "type": "SMALL_TABLE",
+      "row": 2,
+      "col": 22,
+      "uid": "coffee-table"
+    },
+    {
+      "type": "COFFEE_MACHINE",
+      "row": 2,
+      "col": 22,
+      "uid": "coffee-1"
+    },
+    {
+      "type": "CHAIR",
+      "row": 3,
+      "col": 23,
+      "uid": "break-ch1",
+      "color": {
+        "h": 0,
+        "s": -100,
+        "b": -10,
+        "c": 0
+      }
+    },
+    {
+      "type": "CHAIR_BACK",
+      "row": 6,
+      "col": 21,
+      "uid": "break-ch2",
+      "color": {
+        "h": 0,
+        "s": -100,
+        "b": -10,
+        "c": 0
+      }
+    },
+    {
+      "type": "SMALL_PLANT",
+      "row": 2,
+      "col": 24,
+      "uid": "plant-b1"
+    },
+    {
+      "type": "SMALL_SOFA",
+      "row": 8,
+      "col": 21,
+      "uid": "break-sofa"
+    },
+    {
+      "type": "SMALL_TABLE",
+      "row": 8,
+      "col": 23,
+      "uid": "break-table-1"
+    },
+    {
+      "type": "BIG_PLANT",
+      "row": 12,
+      "col": 21,
+      "uid": "plant-b2"
+    },
+    {
+      "type": "BIN",
+      "row": 12,
+      "col": 24,
+      "uid": "bin-b1"
+    },
+    {
+      "type": "SMALL_PLANT",
+      "row": 9,
+      "col": 24,
+      "uid": "plant-b3"
+    },
+    {
+      "uid": "w-clock-m1",
+      "type": "WALL_CLOCK",
+      "col": 17,
+      "row": 0
+    },
+    {
+      "uid": "bs-m1",
+      "type": "BOOKSHELF",
+      "col": 19,
+      "row": 2
+    },
+    {
+      "uid": "bs-m2",
+      "type": "BOOKSHELF",
+      "col": 15,
+      "row": 2
+    },
+    {
+      "uid": "folders-m1",
+      "type": "FOLDERS",
+      "col": 15,
+      "row": 9
+    },
+    {
+      "uid": "plant-m3",
+      "type": "SMALL_PLANT",
+      "col": 19,
+      "row": 8
+    },
+    {
+      "uid": "eat-table-1",
+      "type": "SMALL_TABLE",
+      "col": 21,
+      "row": 5
+    },
+    {
+      "uid": "eat-table-2",
+      "type": "SMALL_TABLE",
+      "col": 22,
+      "row": 5
+    },
+    {
+      "uid": "eat-ch1",
+      "type": "CHAIR",
+      "col": 21,
+      "row": 4,
+      "color": {
+        "h": 0,
+        "s": -100,
+        "b": -10,
+        "c": 0
+      }
+    },
+    {
+      "uid": "eat-ch2",
+      "type": "CHAIR_2",
+      "col": 22,
+      "row": 4,
+      "color": {
+        "h": 0,
+        "s": -100,
+        "b": -10,
+        "c": 0
+      }
+    },
+    {
+      "uid": "eat-ch4",
+      "type": "CHAIR_2_BACK",
+      "col": 22,
+      "row": 6,
+      "color": {
+        "h": 0,
+        "s": -100,
+        "b": -10,
+        "c": 0
+      }
+    },
+    {
+      "uid": "plant-b4",
+      "type": "SMALL_PLANT",
+      "col": 24,
+      "row": 5
+    },
+    {
+      "uid": "folders-b1",
+      "type": "FOLDERS",
+      "col": 23,
+      "row": 9
+    },
+    {
+      "uid": "bs-b1",
+      "type": "BOOKSHELF",
+      "col": 23,
+      "row": 12
+    },
+    {
+      "uid": "books-b1",
+      "type": "BOOKS",
+      "col": 23,
+      "row": 13
+    },
+    {
+      "uid": "plant-b5",
+      "type": "SMALL_PLANT",
+      "col": 21,
+      "row": 15
+    },
+    {
+      "uid": "sofa-down",
+      "type": "BIG_SOFA",
+      "row": 11,
+      "col": 16
+    },
+    {
+      "uid": "sofa-up",
+      "type": "BIG_SOFA_BACK",
+      "row": 14,
+      "col": 16
+    },
+    {
+      "uid": "plant-l1",
+      "type": "SMALL_PLANT",
+      "row": 11,
+      "col": 15
+    },
+    {
+      "uid": "plant-l2",
+      "type": "SMALL_PLANT",
+      "row": 11,
+      "col": 18
+    },
+    {
+      "uid": "plant-l3",
+      "type": "SMALL_PLANT",
+      "row": 14,
+      "col": 19
+    },
+    {
+      "uid": "bin-l1",
+      "type": "BIN",
+      "row": 15,
+      "col": 15
+    },
+    {
+      "uid": "sofa-table",
+      "type": "COFFEE_TABLE",
+      "row": 13,
+      "col": 16
+    }
   ]
 }

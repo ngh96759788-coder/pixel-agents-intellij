@@ -7,6 +7,8 @@ import {
   DISMISS_BUBBLE_FAST_FADE_SEC,
   INACTIVE_SEAT_TIMER_MIN_SEC,
   INACTIVE_SEAT_TIMER_RANGE_SEC,
+  SEAT_REST_MIN_SEC,
+  SEAT_REST_MAX_SEC,
   AUTO_ON_FACING_DEPTH,
   AUTO_ON_SIDE_DEPTH,
   CHARACTER_SITTING_OFFSET_PX,
@@ -120,7 +122,11 @@ export class OfficeState {
     // Relocate any characters that ended up outside bounds or on non-walkable tiles
     for (const ch of this.characters.values()) {
       if (ch.seatId) continue // seated characters are fine
-      if (ch.tileCol < 0 || ch.tileCol >= layout.cols || ch.tileRow < 0 || ch.tileRow >= layout.rows) {
+      const outOfBounds = ch.tileCol < 0 || ch.tileCol >= layout.cols || ch.tileRow < 0 || ch.tileRow >= layout.rows
+      const onNonWalkable = !outOfBounds && !this.walkableTiles.some(
+        t => t.col === Math.floor(ch.tileCol) && t.row === Math.floor(ch.tileRow)
+      )
+      if (outOfBounds || onNonWalkable) {
         this.relocateCharacterToWalkable(ch)
       }
     }
@@ -496,9 +502,8 @@ export class OfficeState {
     if (ch) {
       ch.isActive = active
       if (!active) {
-        // Sentinel -1: signals turn just ended, skip next seat rest timer.
-        // Prevents the WALK handler from setting a 2-4 min rest on arrival.
-        ch.seatTimer = -1
+        // Stay seated for ~40s after turn ends before getting up to wander
+        ch.seatTimer = SEAT_REST_MIN_SEC + Math.random() * (SEAT_REST_MAX_SEC - SEAT_REST_MIN_SEC)
         ch.path = []
         ch.moveProgress = 0
       }
@@ -631,9 +636,17 @@ export class OfficeState {
       }
 
       // Temporarily unblock own seat so character can pathfind to it
-      this.withOwnSeatUnblocked(ch, () =>
-        updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles)
-      )
+      let despawnSignal: 'despawn' | void
+      this.withOwnSeatUnblocked(ch, () => {
+        despawnSignal = updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles)
+      })
+      // Idle timeout — start matrix despawn effect
+      if (despawnSignal! === 'despawn') {
+        ch.matrixEffect = 'despawn'
+        ch.matrixEffectTimer = 0
+        ch.matrixEffectSeeds = matrixEffectSeeds()
+        continue
+      }
 
       // Tick bubble timer for waiting bubbles
       if (ch.bubbleType === 'waiting') {
@@ -673,5 +686,13 @@ export class OfficeState {
       }
     }
     return null
+  }
+
+  /** Force all characters to pick up new sprite data (e.g. after theme change) */
+  refreshCharacterSprites(): void {
+    // The spriteData cache is already cleared by setCharacterTemplates().
+    // Characters reference sprites via getCharacterSprites(palette, hueShift) each frame,
+    // which will rebuild from the new loaded data on next render.
+    // No per-character state changes needed.
   }
 }

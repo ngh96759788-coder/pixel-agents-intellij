@@ -7,6 +7,7 @@ interface SettingsModalProps {
   onClose: () => void
   isDebugMode: boolean
   onToggleDebugMode: () => void
+  currentTheme: string
 }
 
 const menuItemBase: React.CSSProperties = {
@@ -24,9 +25,16 @@ const menuItemBase: React.CSSProperties = {
   textAlign: 'left',
 }
 
-export function SettingsModal({ isOpen, onClose, isDebugMode, onToggleDebugMode }: SettingsModalProps) {
+const THEMES = [
+  { id: 'default', label: 'Office' },
+  { id: 'alien', label: 'UFO' },
+  { id: 'zoo', label: 'Zoo' },
+]
+
+export function SettingsModal({ isOpen, onClose, isDebugMode, onToggleDebugMode, currentTheme }: SettingsModalProps) {
   const [hovered, setHovered] = useState<string | null>(null)
   const [soundLocal, setSoundLocal] = useState(isSoundEnabled)
+  const [themeLocal, setThemeLocal] = useState(currentTheme)
 
   if (!isOpen) return null
 
@@ -58,7 +66,7 @@ export function SettingsModal({ isOpen, onClose, isDebugMode, onToggleDebugMode 
           borderRadius: 0,
           padding: '4px',
           boxShadow: 'var(--pixel-shadow)',
-          minWidth: 200,
+          minWidth: 240,
         }}
       >
         {/* Header with title and X button */}
@@ -134,6 +142,45 @@ export function SettingsModal({ isOpen, onClose, isDebugMode, onToggleDebugMode 
         >
           Import Layout
         </button>
+        {/* Theme selector */}
+        <div
+          style={{
+            ...menuItemBase,
+            justifyContent: 'flex-start',
+            cursor: 'default',
+            gap: 2,
+          }}
+        >
+          <span style={{ flexShrink: 0, marginRight: 4 }}>Theme</span>
+          <div style={{ display: 'flex', gap: 1 }}>
+            {THEMES.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => {
+                  setThemeLocal(t.id)
+                  vscode.postMessage({ type: 'setTheme', theme: t.id })
+                }}
+                onMouseEnter={() => setHovered(`theme-${t.id}`)}
+                onMouseLeave={() => setHovered(null)}
+                style={{
+                  padding: '2px 6px',
+                  fontSize: '18px',
+                  background: themeLocal === t.id
+                    ? 'rgba(90, 140, 255, 0.8)'
+                    : hovered === `theme-${t.id}`
+                      ? 'rgba(255, 255, 255, 0.12)'
+                      : 'rgba(255, 255, 255, 0.05)',
+                  color: themeLocal === t.id ? '#fff' : 'rgba(255, 255, 255, 0.7)',
+                  border: themeLocal === t.id ? '2px solid rgba(90, 140, 255, 0.6)' : '2px solid rgba(255, 255, 255, 0.2)',
+                  borderRadius: 0,
+                  cursor: 'pointer',
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <button
           onClick={() => {
             const newVal = !isSoundEnabled()

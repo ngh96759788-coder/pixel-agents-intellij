@@ -11,12 +11,13 @@ export const MAX_ROWS = 64
 export const WALK_SPEED_PX_PER_SEC = 48
 export const WALK_FRAME_DURATION_SEC = 0.15
 export const TYPE_FRAME_DURATION_SEC = 0.3
-export const WANDER_PAUSE_MIN_SEC = 2.0
-export const WANDER_PAUSE_MAX_SEC = 20.0
+export const WANDER_PAUSE_MIN_SEC = 1.0
+export const WANDER_PAUSE_MAX_SEC = 5.0
 export const WANDER_MOVES_BEFORE_REST_MIN = 3
 export const WANDER_MOVES_BEFORE_REST_MAX = 6
-export const SEAT_REST_MIN_SEC = 120.0
-export const SEAT_REST_MAX_SEC = 240.0
+export const SEAT_REST_MIN_SEC = 35.0
+export const SEAT_REST_MAX_SEC = 45.0
+export const IDLE_DESPAWN_SEC = 60.0
 
 // ── Matrix Effect ────────────────────────────────────────────
 export const MATRIX_EFFECT_DURATION_SEC = 0.3
@@ -96,6 +97,24 @@ export const NOTIFICATION_NOTE_2_START_SEC = 0.1
 export const NOTIFICATION_NOTE_DURATION_SEC = 0.18
 export const NOTIFICATION_VOLUME = 0.14
 
+// ── Spawn Sound (ascending arpeggio) ───────────────────────
+export const SPAWN_NOTE_FREQUENCIES_HZ = [329.63, 440.0, 523.25, 659.25]
+export const SPAWN_NOTE_INTERVAL_SEC = 0.06
+export const SPAWN_NOTE_DURATION_SEC = 0.12
+export const SPAWN_VOLUME = 0.10
+
+// ── Despawn Sound (descending arpeggio) ────────────────────
+export const DESPAWN_NOTE_FREQUENCIES_HZ = [659.25, 523.25, 440.0, 329.63]
+export const DESPAWN_NOTE_INTERVAL_SEC = 0.06
+export const DESPAWN_NOTE_DURATION_SEC = 0.12
+export const DESPAWN_VOLUME = 0.10
+
+// ── Theme Switch Sound (frequency sweep) ───────────────────
+export const THEME_SWITCH_SWEEP_START_HZ = 200
+export const THEME_SWITCH_SWEEP_END_HZ = 800
+export const THEME_SWITCH_DURATION_SEC = 0.3
+export const THEME_SWITCH_VOLUME = 0.08
+
 // ── Game Logic ───────────────────────────────────────────────
 export const MAX_DELTA_TIME_SEC = 0.1
 export const WAITING_BUBBLE_DURATION_SEC = 2.0
@@ -111,3 +130,4 @@ export const CHARACTER_HIT_HALF_WIDTH = 8
 export const CHARACTER_HIT_HEIGHT = 24
 export const TOOL_OVERLAY_VERTICAL_OFFSET = 32
 export const PULSE_ANIMATION_DURATION_SEC = 1.5
+

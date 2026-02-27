@@ -15,31 +15,37 @@ class AssetLoader {
 
     fun loadAllAssets(
         assetsDir: File,
+        charSubdir: String = "characters",
+        floorFilename: String = "floors.png",
+        wallFilename: String = "walls.png",
+        theme: String = Constants.THEME_DEFAULT,
+        furnitureDir: String = "furniture",
+        defaultLayoutFile: String = "default-layout.json",
         onAssetReady: (type: String, payload: Map<String, Any?>) -> Unit
     ) {
-        // Load default layout
-        defaultLayout = loadDefaultLayout(assetsDir)
+        // Load default layout (themed)
+        defaultLayout = loadDefaultLayout(assetsDir, defaultLayoutFile)
 
         // Load character sprites
-        val charSprites = loadCharacterSprites(assetsDir)
+        val charSprites = loadCharacterSprites(assetsDir, charSubdir)
         if (charSprites != null) {
-            onAssetReady("characterSpritesLoaded", mapOf("characters" to charSprites))
+            onAssetReady("characterSpritesLoaded", mapOf("characters" to charSprites, "theme" to theme))
         }
 
         // Load floor tiles
-        val floorTiles = loadFloorTiles(assetsDir)
+        val floorTiles = loadFloorTiles(assetsDir, floorFilename)
         if (floorTiles != null) {
             onAssetReady("floorTilesLoaded", mapOf("sprites" to floorTiles))
         }
 
         // Load wall tiles
-        val wallTiles = loadWallTiles(assetsDir)
+        val wallTiles = loadWallTiles(assetsDir, wallFilename)
         if (wallTiles != null) {
             onAssetReady("wallTilesLoaded", mapOf("sprites" to wallTiles))
         }
 
-        // Load furniture assets
-        val furniture = loadFurnitureAssets(assetsDir)
+        // Load furniture assets (themed)
+        val furniture = loadFurnitureAssets(assetsDir, furnitureDir)
         if (furniture != null) {
             onAssetReady("furnitureAssetsLoaded", furniture)
         }
@@ -72,9 +78,9 @@ class AssetLoader {
         return sprite
     }
 
-    private fun loadDefaultLayout(assetsDir: File): Map<String, Any?>? {
+    fun loadDefaultLayout(assetsDir: File, layoutFilename: String = "default-layout.json"): Map<String, Any?>? {
         try {
-            val layoutFile = File(assetsDir, "default-layout.json")
+            val layoutFile = File(assetsDir, layoutFilename)
             if (!layoutFile.exists()) {
                 println("[AssetLoader] No default-layout.json found at: ${layoutFile.absolutePath}")
                 return null
@@ -90,9 +96,9 @@ class AssetLoader {
         }
     }
 
-    private fun loadCharacterSprites(assetsDir: File): List<Map<String, Any>>? {
+    fun loadCharacterSprites(assetsDir: File, charSubdir: String = "characters"): List<Map<String, Any>>? {
         try {
-            val charDir = File(assetsDir, "characters")
+            val charDir = File(assetsDir, charSubdir)
             val characters = mutableListOf<Map<String, Any>>()
 
             for (ci in 0 until Constants.CHAR_COUNT) {
@@ -130,9 +136,9 @@ class AssetLoader {
         }
     }
 
-    private fun loadFloorTiles(assetsDir: File): List<List<List<String>>>? {
+    fun loadFloorTiles(assetsDir: File, floorFilename: String = "floors.png"): List<List<List<String>>>? {
         try {
-            val floorFile = File(assetsDir, "floors.png")
+            val floorFile = File(assetsDir, floorFilename)
             if (!floorFile.exists()) {
                 println("[AssetLoader] No floors.png found")
                 return null
@@ -157,9 +163,9 @@ class AssetLoader {
         }
     }
 
-    private fun loadWallTiles(assetsDir: File): List<List<List<String>>>? {
+    fun loadWallTiles(assetsDir: File, wallFilename: String = "walls.png"): List<List<List<String>>>? {
         try {
-            val wallFile = File(assetsDir, "walls.png")
+            val wallFile = File(assetsDir, wallFilename)
             if (!wallFile.exists()) {
                 println("[AssetLoader] No walls.png found")
                 return null
@@ -187,9 +193,9 @@ class AssetLoader {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun loadFurnitureAssets(assetsDir: File): Map<String, Any?>? {
+    fun loadFurnitureAssets(assetsDir: File, furnitureDir: String = "furniture"): Map<String, Any?>? {
         try {
-            val catalogFile = File(assetsDir, "furniture/furniture-catalog.json")
+            val catalogFile = File(assetsDir, "$furnitureDir/furniture-catalog.json")
             if (!catalogFile.exists()) {
                 println("[AssetLoader] No furniture catalog found at: ${catalogFile.absolutePath}")
                 return null

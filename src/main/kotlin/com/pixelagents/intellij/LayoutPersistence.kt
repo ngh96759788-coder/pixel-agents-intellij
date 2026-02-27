@@ -90,6 +90,41 @@ class LayoutPersistence : Disposable {
         return null
     }
 
+    private fun getThemeLayoutFilePath(layoutFileName: String): String {
+        return Paths.get(
+            System.getProperty("user.home"),
+            Constants.LAYOUT_FILE_DIR,
+            layoutFileName
+        ).toString()
+    }
+
+    fun readThemeLayoutFromFile(layoutFileName: String): Map<String, Any?>? {
+        val file = File(getThemeLayoutFilePath(layoutFileName))
+        return try {
+            if (!file.exists()) null
+            else {
+                @Suppress("UNCHECKED_CAST")
+                gson.fromJson(file.readText(), Map::class.java) as? Map<String, Any?>
+            }
+        } catch (e: Exception) {
+            println("[Pixel Agents] Failed to read theme layout file: $e")
+            null
+        }
+    }
+
+    fun writeThemeLayoutToFile(layout: Map<String, Any?>, layoutFileName: String) {
+        val filePath = getThemeLayoutFilePath(layoutFileName)
+        val file = File(filePath)
+        try {
+            file.parentFile?.mkdirs()
+            val tmpFile = File("$filePath.tmp")
+            tmpFile.writeText(gson.toJson(layout))
+            tmpFile.renameTo(file)
+        } catch (e: Exception) {
+            println("[Pixel Agents] Failed to write theme layout file: $e")
+        }
+    }
+
     fun markOwnWrite() {
         skipNextChange = true
         try {

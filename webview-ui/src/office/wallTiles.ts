@@ -11,14 +11,15 @@
 
 import type { SpriteData, TileType as TileTypeVal, FloorColor, FurnitureInstance } from './types.js'
 import { TileType, TILE_SIZE } from './types.js'
-import { getColorizedSprite } from './colorize.js'
+import { getColorizedSprite, clearColorizeCache } from './colorize.js'
 
 /** 16 wall sprites indexed by bitmask (0-15) */
 let wallSprites: SpriteData[] | null = null
 
-/** Set wall sprites (called once when extension sends wallTilesLoaded) */
+/** Set wall sprites (called when extension sends wallTilesLoaded, including on theme change) */
 export function setWallSprites(sprites: SpriteData[]): void {
   wallSprites = sprites
+  clearColorizeCache()
 }
 
 /** Check if wall sprites have been loaded */
@@ -104,7 +105,7 @@ export function getWallInstances(
     for (let c = 0; c < tmCols; c++) {
       if (tileMap[r][c] !== TileType.WALL) continue
       const colorIdx = r * layoutCols + c
-      const wallColor = tileColors?.[colorIdx]
+      const wallColor = tileColors?.[colorIdx] ?? undefined
       const wallInfo = wallColor
         ? getColorizedWallSprite(c, r, tileMap, wallColor)
         : getWallSprite(c, r, tileMap)

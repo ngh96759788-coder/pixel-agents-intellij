@@ -12,6 +12,7 @@ import {
   WANDER_MOVES_BEFORE_REST_MAX,
   SEAT_REST_MIN_SEC,
   SEAT_REST_MAX_SEC,
+  IDLE_DESPAWN_SEC,
 } from '../../constants.js'
 
 /** Tools that show reading animation instead of typing */
@@ -52,7 +53,7 @@ export function createCharacter(
   const center = tileCenter(col, row)
   return {
     id,
-    state: CharacterState.TYPE,
+    state: CharacterState.IDLE,
     dir: seat ? seat.facingDir : Direction.DOWN,
     x: center.x,
     y: center.y,
@@ -65,14 +66,15 @@ export function createCharacter(
     hueShift,
     frame: 0,
     frameTimer: 0,
-    wanderTimer: 0,
+    wanderTimer: randomRange(WANDER_PAUSE_MIN_SEC, WANDER_PAUSE_MAX_SEC),
     wanderCount: 0,
     wanderLimit: randomInt(WANDER_MOVES_BEFORE_REST_MIN, WANDER_MOVES_BEFORE_REST_MAX),
-    isActive: true,
+    isActive: false,
     seatId,
     bubbleType: null,
     bubbleTimer: 0,
     seatTimer: 0,
+    idleTimer: 0,
     isSubagent: false,
     parentAgentId: null,
     matrixEffect: null,
@@ -81,6 +83,7 @@ export function createCharacter(
   }
 }
 
+/** Returns 'despawn' if the character should be removed after idle timeout */
 export function updateCharacter(
   ch: Character,
   dt: number,
@@ -88,8 +91,18 @@ export function updateCharacter(
   seats: Map<string, Seat>,
   tileMap: TileTypeVal[][],
   blockedTiles: Set<string>,
-): void {
+): 'despawn' | void {
   ch.frameTimer += dt
+
+  // Track idle time — reset when active, accumulate when idle
+  if (ch.isActive) {
+    ch.idleTimer = 0
+  } else if (!ch.isSubagent && ch.matrixEffect === null) {
+    ch.idleTimer += dt
+    if (ch.idleTimer >= IDLE_DESPAWN_SEC) {
+      return 'despawn'
+    }
+  }
 
   switch (ch.state) {
     case CharacterState.TYPE: {
@@ -103,7 +116,7 @@ export function updateCharacter(
           ch.seatTimer -= dt
           break
         }
-        ch.seatTimer = 0 // clear sentinel
+        ch.seatTimer = 0
         ch.state = CharacterState.IDLE
         ch.frame = 0
         ch.frameTimer = 0
@@ -117,7 +130,6 @@ export function updateCharacter(
     case CharacterState.IDLE: {
       // No idle animation — static pose
       ch.frame = 0
-      if (ch.seatTimer < 0) ch.seatTimer = 0 // clear turn-end sentinel
       // If became active, pathfind to seat
       if (ch.isActive) {
         if (!ch.seatId) {
@@ -149,26 +161,59 @@ export function updateCharacter(
       // Countdown wander timer
       ch.wanderTimer -= dt
       if (ch.wanderTimer <= 0) {
-        // Check if we've wandered enough — return to seat for a rest
+        // Check if we've wandered enough — pick a destination
         if (ch.wanderCount >= ch.wanderLimit && ch.seatId) {
-          const seat = seats.get(ch.seatId)
-          if (seat) {
-            const path = findPath(ch.tileCol, ch.tileRow, seat.seatCol, seat.seatRow, tileMap, blockedTiles)
+          // 40% return to seat, 30% visit meeting room, 30% visit break room
+          const roll = Math.random()
+          let destination: { col: number; row: number } | null = null
+
+          if (roll < 0.4) {
+            // Return to seat for rest
+            const seat = seats.get(ch.seatId)
+            if (seat) destination = { col: seat.seatCol, row: seat.seatRow }
+          } else {
+            // Visit another room — pick a random walkable tile in that area
+            const roomTiles = walkableTiles.filter((t) =>
+              roll < 0.7
+                ? (t.col >= 15 && t.col <= 19) // meeting room
+                : (t.col >= 21 && t.col <= 24)  // break room
+            )
+            if (roomTiles.length > 0) {
+              destination = roomTiles[Math.floor(Math.random() * roomTiles.length)]
+            }
+          }
+
+          if (destination) {
+            const path = findPath(ch.tileCol, ch.tileRow, destination.col, destination.row, tileMap, blockedTiles)
             if (path.length > 0) {
               ch.path = path
               ch.moveProgress = 0
               ch.state = CharacterState.WALK
               ch.frame = 0
               ch.frameTimer = 0
+              // Reset wander count so they'll wander in the new room too
+              ch.wanderCount = 0
+              ch.wanderLimit = randomInt(WANDER_MOVES_BEFORE_REST_MIN, WANDER_MOVES_BEFORE_REST_MAX)
               break
             }
           }
         }
         if (walkableTiles.length > 0) {
-          const target = walkableTiles[Math.floor(Math.random() * walkableTiles.length)]
-          const path = findPath(ch.tileCol, ch.tileRow, target.col, target.row, tileMap, blockedTiles)
-          if (path.length > 0) {
-            ch.path = path
+          // Pick a nearby target for short wander
+          let bestPath: Array<{ col: number; row: number }> | null = null
+          for (let attempt = 0; attempt < 5; attempt++) {
+            const target = walkableTiles[Math.floor(Math.random() * walkableTiles.length)]
+            const path = findPath(ch.tileCol, ch.tileRow, target.col, target.row, tileMap, blockedTiles)
+            if (path.length > 0 && path.length <= 8) {
+              bestPath = path
+              break
+            }
+            if (path.length > 0 && (!bestPath || path.length < bestPath.length)) {
+              bestPath = path
+            }
+          }
+          if (bestPath) {
+            ch.path = bestPath
             ch.moveProgress = 0
             ch.state = CharacterState.WALK
             ch.frame = 0
@@ -214,13 +259,7 @@ export function updateCharacter(
             if (seat && ch.tileCol === seat.seatCol && ch.tileRow === seat.seatRow) {
               ch.state = CharacterState.TYPE
               ch.dir = seat.facingDir
-              // seatTimer < 0 is a sentinel from setAgentActive(false) meaning
-              // "turn just ended" — skip the long rest so idle transition is immediate
-              if (ch.seatTimer < 0) {
-                ch.seatTimer = 0
-              } else {
-                ch.seatTimer = randomRange(SEAT_REST_MIN_SEC, SEAT_REST_MAX_SEC)
-              }
+              ch.seatTimer = randomRange(SEAT_REST_MIN_SEC, SEAT_REST_MAX_SEC)
               ch.wanderCount = 0
               ch.wanderLimit = randomInt(WANDER_MOVES_BEFORE_REST_MIN, WANDER_MOVES_BEFORE_REST_MAX)
               ch.frame = 0

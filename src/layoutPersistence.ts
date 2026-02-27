@@ -13,6 +13,10 @@ function getLayoutFilePath(): string {
 	return path.join(os.homedir(), LAYOUT_FILE_DIR, LAYOUT_FILE_NAME);
 }
 
+function getThemeLayoutFilePath(layoutFileName: string): string {
+	return path.join(os.homedir(), LAYOUT_FILE_DIR, layoutFileName);
+}
+
 export function readLayoutFromFile(): Record<string, unknown> | null {
 	const filePath = getLayoutFilePath();
 	try {
@@ -38,6 +42,34 @@ export function writeLayoutToFile(layout: Record<string, unknown>): void {
 		fs.renameSync(tmpPath, filePath);
 	} catch (err) {
 		console.error('[Pixel Agents] Failed to write layout file:', err);
+	}
+}
+
+export function readThemeLayoutFromFile(layoutFileName: string): Record<string, unknown> | null {
+	const filePath = getThemeLayoutFilePath(layoutFileName);
+	try {
+		if (!fs.existsSync(filePath)) return null;
+		const raw = fs.readFileSync(filePath, 'utf-8');
+		return JSON.parse(raw) as Record<string, unknown>;
+	} catch (err) {
+		console.error('[Pixel Agents] Failed to read theme layout file:', err);
+		return null;
+	}
+}
+
+export function writeThemeLayoutToFile(layout: Record<string, unknown>, layoutFileName: string): void {
+	const filePath = getThemeLayoutFilePath(layoutFileName);
+	const dir = path.dirname(filePath);
+	try {
+		if (!fs.existsSync(dir)) {
+			fs.mkdirSync(dir, { recursive: true });
+		}
+		const json = JSON.stringify(layout, null, 2);
+		const tmpPath = filePath + '.tmp';
+		fs.writeFileSync(tmpPath, json, 'utf-8');
+		fs.renameSync(tmpPath, filePath);
+	} catch (err) {
+		console.error('[Pixel Agents] Failed to write theme layout file:', err);
 	}
 }
 

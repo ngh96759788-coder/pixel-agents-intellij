@@ -14,8 +14,8 @@ import {
 } from './agentManager.js';
 import { ensureProjectScan } from './fileWatcher.js';
 import { loadFurnitureAssets, sendAssetsToWebview, loadFloorTiles, sendFloorTilesToWebview, loadWallTiles, sendWallTilesToWebview, loadCharacterSprites, sendCharacterSpritesToWebview, loadDefaultLayout } from './assetLoader.js';
-import { WORKSPACE_KEY_AGENT_SEATS, GLOBAL_KEY_SOUND_ENABLED } from './constants.js';
-import { writeLayoutToFile, readLayoutFromFile, watchLayoutFile } from './layoutPersistence.js';
+import { WORKSPACE_KEY_AGENT_SEATS, GLOBAL_KEY_SOUND_ENABLED, GLOBAL_KEY_THEME, THEME_DEFAULT, THEME_CHAR_DIRS, THEME_FLOOR_FILES, THEME_WALL_FILES, THEME_FURNITURE_DIRS, THEME_DEFAULT_LAYOUTS, THEME_LAYOUT_FILES, VALID_THEMES } from './constants.js';
+import { writeLayoutToFile, readLayoutFromFile, writeThemeLayoutToFile, readThemeLayoutFromFile, watchLayoutFile } from './layoutPersistence.js';
 import type { LayoutWatcher } from './layoutPersistence.js';
 
 export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
@@ -41,6 +41,12 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
 
 	// Cross-window layout sync
 	layoutWatcher: LayoutWatcher | null = null;
+
+	// Cached assets root for theme switching
+	private assetsRoot: string | null = null;
+
+	// Current active theme
+	private currentTheme: string = THEME_DEFAULT;
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -86,9 +92,84 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
 				this.context.workspaceState.update(WORKSPACE_KEY_AGENT_SEATS, message.seats);
 			} else if (message.type === 'saveLayout') {
 				this.layoutWatcher?.markOwnWrite();
-				writeLayoutToFile(message.layout as Record<string, unknown>);
+				const layout = message.layout as Record<string, unknown>;
+				writeLayoutToFile(layout);
+				// Also save to theme-specific file
+				const themeLayoutFile = THEME_LAYOUT_FILES[this.currentTheme];
+				if (themeLayoutFile && themeLayoutFile !== 'layout.json') {
+					writeThemeLayoutToFile(layout, themeLayoutFile);
+				}
 			} else if (message.type === 'setSoundEnabled') {
 				this.context.globalState.update(GLOBAL_KEY_SOUND_ENABLED, message.enabled);
+			} else if (message.type === 'setTheme') {
+				const theme = VALID_THEMES.includes(message.theme) ? message.theme : THEME_DEFAULT;
+				console.log(`[Extension] Theme changed to: ${theme}, assetsRoot: ${this.assetsRoot}`);
+				this.context.globalState.update(GLOBAL_KEY_THEME, theme);
+
+				if (this.assetsRoot && this.webview) {
+					const previousTheme = this.currentTheme;
+					this.currentTheme = theme;
+					const ar = this.assetsRoot;
+					const wv = this.webview;
+
+					(async () => {
+						try {
+							// 1. Save current layout to previous theme's file
+							const prevLayoutFile = THEME_LAYOUT_FILES[previousTheme] || 'layout.json';
+							const currentLayout = readThemeLayoutFromFile(prevLayoutFile) || readLayoutFromFile();
+							if (currentLayout) {
+								writeThemeLayoutToFile(currentLayout, prevLayoutFile);
+							}
+
+							// 2. Reload character sprites
+							const charSubdir = THEME_CHAR_DIRS[theme] || 'characters';
+							const charSprites = await loadCharacterSprites(ar, charSubdir);
+							if (charSprites && wv) sendCharacterSpritesToWebview(wv, charSprites);
+
+							// 3. Reload floor tiles
+							const floorFile = THEME_FLOOR_FILES[theme] || 'floors.png';
+							const floorTiles = await loadFloorTiles(ar, floorFile);
+							if (floorTiles && wv) sendFloorTilesToWebview(wv, floorTiles);
+
+							// 4. Reload wall tiles
+							const wallFile = THEME_WALL_FILES[theme] || 'walls.png';
+							const wallTiles = await loadWallTiles(ar, wallFile);
+							if (wallTiles && wv) sendWallTilesToWebview(wv, wallTiles);
+
+							// 5. Reload furniture assets
+							const furnitureDir = THEME_FURNITURE_DIRS[theme] || 'furniture';
+							const assets = await loadFurnitureAssets(ar, furnitureDir);
+							if (assets && wv) sendAssetsToWebview(wv, assets);
+
+							// 6. Load theme layout (user-saved → bundled default → null)
+							const themeLayoutFile = THEME_LAYOUT_FILES[theme] || 'layout.json';
+							let themeLayout = readThemeLayoutFromFile(themeLayoutFile);
+							if (!themeLayout) {
+								const defaultLayoutFile = THEME_DEFAULT_LAYOUTS[theme] || 'default-layout.json';
+								themeLayout = loadDefaultLayout(ar, defaultLayoutFile);
+								if (themeLayout) {
+									writeThemeLayoutToFile(themeLayout, themeLayoutFile);
+								}
+							}
+
+							// 7. Also write to main layout.json so the watcher stays in sync
+							if (themeLayout) {
+								this.layoutWatcher?.markOwnWrite();
+								writeLayoutToFile(themeLayout);
+							}
+
+							// 8. Send layout + themeChanged to webview
+							if (wv) {
+								if (themeLayout) {
+									wv.postMessage({ type: 'layoutLoaded', layout: themeLayout });
+								}
+								wv.postMessage({ type: 'themeChanged', theme });
+							}
+						} catch (err) {
+							console.error('[Extension] Error switching theme:', err);
+						}
+					})();
+				}
 			} else if (message.type === 'webviewReady') {
 				restoreAgents(
 					this.context,
@@ -100,7 +181,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
 				);
 				// Send persisted settings to webview
 				const soundEnabled = this.context.globalState.get<boolean>(GLOBAL_KEY_SOUND_ENABLED, true);
-				this.webview?.postMessage({ type: 'settingsLoaded', soundEnabled });
+				const theme = this.context.globalState.get<string>(GLOBAL_KEY_THEME, THEME_DEFAULT);
+				this.webview?.postMessage({ type: 'settingsLoaded', soundEnabled, theme });
 
 				// Ensure project scan runs even with no restored agents (to adopt external terminals)
 				const projectDir = getProjectDirPath();
@@ -144,32 +226,40 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
 							}
 
 							console.log('[Extension] Using assetsRoot:', assetsRoot);
+							this.assetsRoot = assetsRoot;
+							this.currentTheme = theme;
 
-							// Load bundled default layout
-							this.defaultLayout = loadDefaultLayout(assetsRoot);
+							// Load bundled default layout (themed)
+							const defaultLayoutFile = THEME_DEFAULT_LAYOUTS[theme] || 'default-layout.json';
+							this.defaultLayout = loadDefaultLayout(assetsRoot, defaultLayoutFile);
 
-							// Load character sprites
-							const charSprites = await loadCharacterSprites(assetsRoot);
+							// Load character sprites (themed)
+							const charSubdir = THEME_CHAR_DIRS[theme] || 'characters';
+							const charSprites = await loadCharacterSprites(assetsRoot, charSubdir);
 							if (charSprites && this.webview) {
 								console.log('[Extension] Character sprites loaded, sending to webview');
 								sendCharacterSpritesToWebview(this.webview, charSprites);
 							}
 
-							// Load floor tiles
-							const floorTiles = await loadFloorTiles(assetsRoot);
+							// Load floor tiles (themed)
+							const floorFile = THEME_FLOOR_FILES[theme] || 'floors.png';
+							const floorTiles = await loadFloorTiles(assetsRoot, floorFile);
 							if (floorTiles && this.webview) {
 								console.log('[Extension] Floor tiles loaded, sending to webview');
 								sendFloorTilesToWebview(this.webview, floorTiles);
 							}
 
-							// Load wall tiles
-							const wallTiles = await loadWallTiles(assetsRoot);
+							// Load wall tiles (themed)
+							const wallFile = THEME_WALL_FILES[theme] || 'walls.png';
+							const wallTiles = await loadWallTiles(assetsRoot, wallFile);
 							if (wallTiles && this.webview) {
 								console.log('[Extension] Wall tiles loaded, sending to webview');
 								sendWallTilesToWebview(this.webview, wallTiles);
 							}
 
-							const assets = await loadFurnitureAssets(assetsRoot);
+							// Load furniture assets (themed)
+							const furnitureDir = THEME_FURNITURE_DIRS[theme] || 'furniture';
+							const assets = await loadFurnitureAssets(assetsRoot, furnitureDir);
 							if (assets && this.webview) {
 								console.log('[Extension] ✅ Assets loaded, sending to webview');
 								sendAssetsToWebview(this.webview, assets);
@@ -192,16 +282,22 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
 							const bundled = path.join(ep, 'dist', 'assets');
 							if (fs.existsSync(bundled)) {
 								const distRoot = path.join(ep, 'dist');
-								this.defaultLayout = loadDefaultLayout(distRoot);
-								const cs = await loadCharacterSprites(distRoot);
+								this.assetsRoot = distRoot;
+								this.currentTheme = theme;
+								const dlFile = THEME_DEFAULT_LAYOUTS[theme] || 'default-layout.json';
+								this.defaultLayout = loadDefaultLayout(distRoot, dlFile);
+								const csSubdir = THEME_CHAR_DIRS[theme] || 'characters';
+								const cs = await loadCharacterSprites(distRoot, csSubdir);
 								if (cs && this.webview) {
 									sendCharacterSpritesToWebview(this.webview, cs);
 								}
-								const ft = await loadFloorTiles(distRoot);
+								const flFile = THEME_FLOOR_FILES[theme] || 'floors.png';
+								const ft = await loadFloorTiles(distRoot, flFile);
 								if (ft && this.webview) {
 									sendFloorTilesToWebview(this.webview, ft);
 								}
-								const wt = await loadWallTiles(distRoot);
+								const wlFile = THEME_WALL_FILES[theme] || 'walls.png';
+								const wt = await loadWallTiles(distRoot, wlFile);
 								if (wt && this.webview) {
 									sendWallTilesToWebview(this.webview, wt);
 								}

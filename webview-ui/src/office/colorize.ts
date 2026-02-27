@@ -125,6 +125,72 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
 }
 
 /**
+ * Detect whether a pixel (in HSL) is a skin-tone color.
+ * Skin pixels have warm hues (10-50°), moderate+ saturation, and high lightness.
+ * This distinguishes skin from dark hair that shares similar hues but lower lightness.
+ */
+function isSkinTone(h: number, s: number, l: number): boolean {
+  return h >= 10 && h <= 50 && s > 0.25 && l > 0.55
+}
+
+/**
+ * Adjust a sprite's colors by shifting HSL values, but preserve skin-tone pixels.
+ * Used for character hue shifts so agents don't get unnatural blue/green skin.
+ * Skin pixels (warm hue, high lightness) are kept unchanged.
+ */
+export function adjustSpritePreserveSkin(sprite: SpriteData, color: FloorColor): SpriteData {
+  const { h: hShift, s: sShift, b, c } = color
+  const result: SpriteData = []
+
+  for (const row of sprite) {
+    const newRow: string[] = []
+    for (const pixel of row) {
+      if (pixel === '') {
+        newRow.push('')
+        continue
+      }
+
+      const r = parseInt(pixel.slice(1, 3), 16)
+      const g = parseInt(pixel.slice(3, 5), 16)
+      const bv = parseInt(pixel.slice(5, 7), 16)
+      const [origH, origS, origL] = rgbToHsl(r, g, bv)
+
+      // Skip hue shift for skin-tone pixels — keep them natural
+      if (isSkinTone(origH, origS, origL)) {
+        newRow.push(pixel)
+        continue
+      }
+
+      // Shift hue
+      const newH = ((origH + hShift) % 360 + 360) % 360
+
+      // Shift saturation
+      const newS = Math.max(0, Math.min(1, origS + sShift / 100))
+
+      // Apply contrast: expand/compress around 0.5
+      let lightness = origL
+      if (c !== 0) {
+        const factor = (100 + c) / 100
+        lightness = 0.5 + (lightness - 0.5) * factor
+      }
+
+      // Apply brightness
+      if (b !== 0) {
+        lightness = lightness + b / 200
+      }
+
+      lightness = Math.max(0, Math.min(1, lightness))
+
+      const hex = hslToHex(newH, newS, lightness)
+      newRow.push(hex)
+    }
+    result.push(newRow)
+  }
+
+  return result
+}
+
+/**
  * Adjust a sprite's colors by shifting HSL values (default mode for furniture).
  *
  * H slider (-180 to +180): rotates hue

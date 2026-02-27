@@ -55,10 +55,11 @@ export interface LoadedAssets {
  */
 export async function loadFurnitureAssets(
   workspaceRoot: string,
+  furnitureDir = 'furniture',
 ): Promise<LoadedAssets | null> {
   try {
     console.log(`[AssetLoader] workspaceRoot received: "${workspaceRoot}"`)
-    const catalogPath = path.join(workspaceRoot, 'assets', 'furniture', 'furniture-catalog.json')
+    const catalogPath = path.join(workspaceRoot, 'assets', furnitureDir, 'furniture-catalog.json')
     console.log(`[AssetLoader] Attempting to load from: ${catalogPath}`)
 
     if (!fs.existsSync(catalogPath)) {
@@ -168,9 +169,9 @@ function pngToSpriteData(pngBuffer: Buffer, width: number, height: number): stri
  * Load the bundled default layout from assets/default-layout.json.
  * Returns the parsed layout object or null if not found.
  */
-export function loadDefaultLayout(assetsRoot: string): Record<string, unknown> | null {
+export function loadDefaultLayout(assetsRoot: string, layoutFile = 'default-layout.json'): Record<string, unknown> | null {
   try {
-    const layoutPath = path.join(assetsRoot, 'assets', 'default-layout.json')
+    const layoutPath = path.join(assetsRoot, 'assets', layoutFile)
     if (!fs.existsSync(layoutPath)) {
       console.log('[AssetLoader] No default-layout.json found at:', layoutPath)
       return null
@@ -198,9 +199,10 @@ export interface LoadedWallTiles {
  */
 export async function loadWallTiles(
   assetsRoot: string,
+  wallFile = 'walls.png',
 ): Promise<LoadedWallTiles | null> {
   try {
-    const wallPath = path.join(assetsRoot, 'assets', 'walls.png')
+    const wallPath = path.join(assetsRoot, 'assets', wallFile)
     if (!fs.existsSync(wallPath)) {
       console.log('[AssetLoader] No walls.png found at:', wallPath)
       return null
@@ -265,9 +267,10 @@ export interface LoadedFloorTiles {
  */
 export async function loadFloorTiles(
   assetsRoot: string,
+  floorFile = 'floors.png',
 ): Promise<LoadedFloorTiles | null> {
   try {
-    const floorPath = path.join(assetsRoot, 'assets', 'floors.png')
+    const floorPath = path.join(assetsRoot, 'assets', floorFile)
     if (!fs.existsSync(floorPath)) {
       console.log('[AssetLoader] No floors.png found at:', floorPath)
       return null
@@ -336,14 +339,16 @@ export interface LoadedCharacterSprites {
 
 
 /**
- * Load pre-colored character sprites from assets/characters/ (6 PNGs, each 112×96).
+ * Load pre-colored character sprites from a characters subdirectory (6 PNGs, each 112×96).
  * Each PNG has 3 direction rows (down, up, right) × 7 frames (16×32 each).
+ * @param charSubdir - subdirectory name under assets/ (default: 'characters')
  */
 export async function loadCharacterSprites(
   assetsRoot: string,
+  charSubdir = 'characters',
 ): Promise<LoadedCharacterSprites | null> {
   try {
-    const charDir = path.join(assetsRoot, 'assets', 'characters')
+    const charDir = path.join(assetsRoot, 'assets', charSubdir)
     const characters: CharacterDirectionSprites[] = []
 
     for (let ci = 0; ci < CHAR_COUNT; ci++) {

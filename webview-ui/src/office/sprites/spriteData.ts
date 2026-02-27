@@ -1,6 +1,6 @@
 import type { Direction, SpriteData, FloorColor } from '../types.js'
 import { Direction as Dir } from '../types.js'
-import { adjustSprite } from '../colorize.js'
+import { adjustSpritePreserveSkin } from '../colorize.js'
 
 // ── Color Palettes ──────────────────────────────────────────────
 const _ = '' // transparent
@@ -1022,7 +1022,7 @@ const spriteCache = new Map<string, CharacterSprites>()
 /** Apply hue shift to every sprite in a CharacterSprites set */
 function hueShiftSprites(sprites: CharacterSprites, hueShift: number): CharacterSprites {
   const color: FloorColor = { h: hueShift, s: 0, b: 0, c: 0 }
-  const shift = (s: SpriteData) => adjustSprite(s, color)
+  const shift = (s: SpriteData) => adjustSpritePreserveSkin(s, color)
   const shiftWalk = (arr: [SpriteData, SpriteData, SpriteData, SpriteData]): [SpriteData, SpriteData, SpriteData, SpriteData] =>
     [shift(arr[0]), shift(arr[1]), shift(arr[2]), shift(arr[3])]
   const shiftPair = (arr: [SpriteData, SpriteData]): [SpriteData, SpriteData] =>

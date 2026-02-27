@@ -31,6 +31,56 @@ export const LAYOUT_FILE_POLL_INTERVAL_MS = 2000;
 
 // ── Settings Persistence ────────────────────────────────────
 export const GLOBAL_KEY_SOUND_ENABLED = 'pixel-agents.soundEnabled';
+export const GLOBAL_KEY_THEME = 'pixel-agents.theme';
+
+// ── Theme Definitions ──────────────────────────────────────
+export const THEME_DEFAULT = 'default';
+export const THEME_ALIEN = 'alien';
+export const THEME_ZOO = 'zoo';
+export const VALID_THEMES = [THEME_DEFAULT, THEME_ALIEN, THEME_ZOO] as const;
+export type ThemeId = typeof VALID_THEMES[number];
+
+/** Maps theme ID to the characters subdirectory name */
+export const THEME_CHAR_DIRS: Record<string, string> = {
+  [THEME_DEFAULT]: 'characters',
+  [THEME_ALIEN]: 'characters-alien',
+  [THEME_ZOO]: 'characters-zoo',
+};
+
+/** Maps theme ID to floors PNG filename */
+export const THEME_FLOOR_FILES: Record<string, string> = {
+  [THEME_DEFAULT]: 'floors.png',
+  [THEME_ALIEN]: 'floors-alien.png',
+  [THEME_ZOO]: 'floors-zoo.png',
+};
+
+/** Maps theme ID to walls PNG filename */
+export const THEME_WALL_FILES: Record<string, string> = {
+  [THEME_DEFAULT]: 'walls.png',
+  [THEME_ALIEN]: 'walls-alien.png',
+  [THEME_ZOO]: 'walls-zoo.png',
+};
+
+/** Maps theme ID to furniture subdirectory */
+export const THEME_FURNITURE_DIRS: Record<string, string> = {
+  [THEME_DEFAULT]: 'furniture',
+  [THEME_ALIEN]: 'furniture-alien',
+  [THEME_ZOO]: 'furniture',
+};
+
+/** Maps theme ID to bundled default layout filename */
+export const THEME_DEFAULT_LAYOUTS: Record<string, string> = {
+  [THEME_DEFAULT]: 'default-layout.json',
+  [THEME_ALIEN]: 'default-layout-alien.json',
+  [THEME_ZOO]: 'default-layout.json',
+};
+
+/** Maps theme ID to user-level layout filename in ~/.pixel-agents/ */
+export const THEME_LAYOUT_FILES: Record<string, string> = {
+  [THEME_DEFAULT]: 'layout.json',
+  [THEME_ALIEN]: 'layout-alien.json',
+  [THEME_ZOO]: 'layout-zoo.json',
+};
 
 // ── VS Code Identifiers ─────────────────────────────────────
 export const VIEW_ID = 'pixel-agents.panelView';

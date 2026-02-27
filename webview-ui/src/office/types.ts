@@ -189,6 +189,8 @@ export interface Character {
   isSubagent: boolean
   /** Parent agent ID if this is a sub-agent, null otherwise */
   parentAgentId: number | null
+  /** Cumulative idle time in seconds — triggers despawn when exceeding threshold */
+  idleTimer: number
   /** Active matrix spawn/despawn effect, or null */
   matrixEffect: 'spawn' | 'despawn' | null
   /** Timer counting up from 0 to MATRIX_EFFECT_DURATION */

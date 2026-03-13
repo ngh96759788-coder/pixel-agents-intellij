@@ -1,5 +1,6 @@
 import { FurnitureType } from '../types.js'
 import type { FurnitureCatalogEntry, SpriteData } from '../types.js'
+import { AUTO_ANIMATE_INTERVAL_SEC } from '../../constants.js'
 import {
   DESK_SQUARE_SPRITE,
   BOOKSHELF_SPRITE,
@@ -28,6 +29,9 @@ export interface LoadedAssetData {
     backgroundTiles?: number
     renderOffsetY?: number
     canPlaceOnWalls?: boolean
+    autoAnimate?: boolean
+    animIntervalSec?: number
+    animSequence?: string[]
   }>
   sprites: Record<string, SpriteData>
 }
@@ -106,6 +110,9 @@ export function buildDynamicCatalog(assets: LoadedAssetData): boolean {
       ...(asset.backgroundTiles ? { backgroundTiles: asset.backgroundTiles } : {}),
       ...(asset.renderOffsetY ? { renderOffsetY: asset.renderOffsetY } : {}),
       ...(asset.canPlaceOnWalls ? { canPlaceOnWalls: true } : {}),
+      ...(asset.autoAnimate ? { autoAnimate: true } : {}),
+      ...(asset.animIntervalSec ? { animIntervalSec: asset.animIntervalSec } : {}),
+      ...(asset.animSequence ? { animSequence: asset.animSequence } : {}),
     }
   }).filter((e): e is CatalogEntryWithCategory => e !== null)
 
@@ -302,4 +309,22 @@ export function getOffStateType(currentType: string): string {
 /** Returns true if the given furniture type is part of a rotation group. */
 export function isRotatable(type: string): boolean {
   return rotationGroups.has(type)
+}
+
+/** Returns true if the given furniture type has autoAnimate enabled. */
+export function isAutoAnimated(type: string): boolean {
+  const entry = getCatalogEntry(type)
+  return !!entry?.autoAnimate
+}
+
+/** Returns the animation interval for a given furniture type, or the default. */
+export function getAnimInterval(type: string): number {
+  const entry = getCatalogEntry(type)
+  return entry?.animIntervalSec ?? AUTO_ANIMATE_INTERVAL_SEC
+}
+
+/** Returns the animation sequence for a given furniture type, or null if none defined. */
+export function getAnimSequence(type: string): string[] | null {
+  const entry = getCatalogEntry(type)
+  return entry?.animSequence ?? null
 }

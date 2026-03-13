@@ -1,6 +1,7 @@
 import type { Direction, SpriteData, FloorColor } from '../types.js'
 import { Direction as Dir } from '../types.js'
 import { adjustSpritePreserveSkin } from '../colorize.js'
+import { PALETTE_COUNT } from '../../constants.js'
 
 // ── Color Palettes ──────────────────────────────────────────────
 const _ = '' // transparent
@@ -983,9 +984,6 @@ export const CHARACTER_TEMPLATES = {
   ],
 } as const
 
-// ════════════════════════════════════════════════════════════════
-// Loaded character sprites (from PNG assets)
-// ════════════════════════════════════════════════════════════════
 
 interface LoadedCharacterData {
   down: SpriteData[]
@@ -994,12 +992,24 @@ interface LoadedCharacterData {
 }
 
 let loadedCharacters: LoadedCharacterData[] | null = null
+let loadedTheme = 'default'
 
 /** Set pre-colored character sprites loaded from PNG assets. Call this when characterSpritesLoaded message arrives. */
-export function setCharacterTemplates(data: LoadedCharacterData[]): void {
+export function setCharacterTemplates(data: LoadedCharacterData[], theme?: string): void {
   loadedCharacters = data
+  loadedTheme = theme ?? 'default'
   // Clear cache so sprites are rebuilt from loaded data
   spriteCache.clear()
+}
+
+/** Check if the current theme uses pre-colored characters that should not be hue-shifted. */
+export function isHueShiftDisabled(): boolean {
+  return loadedTheme !== 'default'
+}
+
+/** Get the number of loaded character palettes (falls back to PALETTE_COUNT constant). */
+export function getLoadedPaletteCount(): number {
+  return loadedCharacters ? loadedCharacters.length : PALETTE_COUNT
 }
 
 /** Flip a SpriteData horizontally (for generating left sprites from right) */
@@ -1112,8 +1122,8 @@ export function getCharacterSprites(paletteIndex: number, hueShift = 0): Charact
     }
   }
 
-  // Apply hue shift if non-zero
-  if (hueShift !== 0) {
+  // Apply hue shift if non-zero (disabled for themed characters like zoo/alien)
+  if (hueShift !== 0 && !isHueShiftDisabled()) {
     sprites = hueShiftSprites(sprites, hueShift)
   }
 

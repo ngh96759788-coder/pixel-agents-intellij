@@ -56,15 +56,15 @@ object Constants {
     val THEME_FURNITURE_DIRS = mapOf(
         "default" to "furniture",
         "alien" to "furniture-alien",
-        "zoo" to "furniture",
+        "zoo" to "furniture-zoo",
     )
     val THEME_DEFAULT_LAYOUTS = mapOf(
         "default" to "default-layout.json",
         "alien" to "default-layout-alien.json",
-        "zoo" to "default-layout.json",
+        "zoo" to "default-layout-zoo.json",
     )
     val THEME_LAYOUT_FILES = mapOf(
-        "default" to "layout.json",
+        "default" to "layout-default.json",
         "alien" to "layout-alien.json",
         "zoo" to "layout-zoo.json",
     )

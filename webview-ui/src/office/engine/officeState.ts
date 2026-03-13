@@ -1,6 +1,6 @@
 import { TILE_SIZE, MATRIX_EFFECT_DURATION, CharacterState, Direction } from '../types.js'
+import { getLoadedPaletteCount } from '../sprites/spriteData.js'
 import {
-  PALETTE_COUNT,
   HUE_SHIFT_MIN_DEG,
   HUE_SHIFT_RANGE_DEG,
   WAITING_BUBBLE_DURATION_SEC,
@@ -26,7 +26,7 @@ import {
   layoutToSeats,
   getBlockedTiles,
 } from '../layout/layoutSerializer.js'
-import { getCatalogEntry, getOnStateType } from '../layout/furnitureCatalog.js'
+import { getCatalogEntry, getOnStateType, getToggledType, isAutoAnimated, getAnimSequence, getAnimInterval } from '../layout/furnitureCatalog.js'
 
 export class OfficeState {
   layout: OfficeLayout
@@ -45,6 +45,8 @@ export class OfficeState {
   /** Reverse lookup: sub-agent character ID → parent info */
   subagentMeta: Map<number, { parentAgentId: number; parentToolId: string }> = new Map()
   private nextSubagentId = -1
+  private autoAnimateState = new Map<string, { frameIdx: number; timer: number }>()
+  private autoAnimateOverrides = new Map<string, string>()
 
   constructor(layout?: OfficeLayout) {
     this.layout = layout || createDefaultLayout()
@@ -58,12 +60,14 @@ export class OfficeState {
   /** Rebuild all derived state from a new layout. Reassigns existing characters.
    *  @param shift Optional pixel shift to apply when grid expands left/up */
   rebuildFromLayout(layout: OfficeLayout, shift?: { col: number; row: number }): void {
+    console.log(`[OfficeState.rebuildFromLayout] cols=${layout.cols} rows=${layout.rows} furniture=${layout.furniture.length}`)
     this.layout = layout
     this.tileMap = layoutToTileMap(layout)
     this.seats = layoutToSeats(layout.furniture)
     this.blockedTiles = getBlockedTiles(layout.furniture)
     this.rebuildFurnitureInstances()
     this.walkableTiles = getWalkableTiles(this.tileMap, this.blockedTiles)
+    console.log(`[OfficeState.rebuildFromLayout] blockedTiles=${this.blockedTiles.size} walkableTiles=${this.walkableTiles.length} seats=${this.seats.size}`)
 
     // Shift character positions when grid expands left/up
     if (shift && (shift.col !== 0 || shift.row !== 0)) {
@@ -178,16 +182,17 @@ export class OfficeState {
    * repeat in balanced rounds with a random hue shift (≥45°).
    */
   private pickDiversePalette(): { palette: number; hueShift: number } {
-    // Count how many non-sub-agents use each base palette (0-5)
-    const counts = new Array(PALETTE_COUNT).fill(0) as number[]
+    // Count how many non-sub-agents use each base palette
+    const paletteCount = getLoadedPaletteCount()
+    const counts = new Array(paletteCount).fill(0) as number[]
     for (const ch of this.characters.values()) {
       if (ch.isSubagent) continue
-      counts[ch.palette]++
+      counts[ch.palette % paletteCount]++
     }
     const minCount = Math.min(...counts)
     // Available = palettes at the minimum count (least used)
     const available: number[] = []
-    for (let i = 0; i < PALETTE_COUNT; i++) {
+    for (let i = 0; i < paletteCount; i++) {
       if (counts[i] === minCount) available.push(i)
     }
     const palette = available[Math.floor(Math.random() * available.length)]
@@ -544,28 +549,41 @@ export class OfficeState {
       }
     }
 
+    // Helper: apply autoAnimate overrides to a furniture list
+    const applyAnimOverrides = (items: PlacedFurniture[]): PlacedFurniture[] => {
+      if (this.autoAnimateOverrides.size === 0) return items
+      return items.map((item) => {
+        const override = this.autoAnimateOverrides.get(item.uid)
+        return override ? { ...item, type: override } : item
+      })
+    }
+
     if (autoOnTiles.size === 0) {
-      this.furniture = layoutToFurnitureInstances(this.layout.furniture)
+      this.furniture = layoutToFurnitureInstances(applyAnimOverrides(this.layout.furniture))
       return
     }
 
     // Build modified furniture list with auto-state applied
     const modifiedFurniture: PlacedFurniture[] = this.layout.furniture.map((item) => {
-      const entry = getCatalogEntry(item.type)
-      if (!entry) return item
+      // Apply autoAnimate override first
+      const animOverride = this.autoAnimateOverrides.get(item.uid)
+      const currentItem = animOverride ? { ...item, type: animOverride } : item
+
+      const entry = getCatalogEntry(currentItem.type)
+      if (!entry) return currentItem
       // Check if any tile of this furniture overlaps an auto-on tile
       for (let dr = 0; dr < entry.footprintH; dr++) {
         for (let dc = 0; dc < entry.footprintW; dc++) {
-          if (autoOnTiles.has(`${item.col + dc},${item.row + dr}`)) {
-            const onType = getOnStateType(item.type)
-            if (onType !== item.type) {
-              return { ...item, type: onType }
+          if (autoOnTiles.has(`${currentItem.col + dc},${currentItem.row + dr}`)) {
+            const onType = getOnStateType(currentItem.type)
+            if (onType !== currentItem.type) {
+              return { ...currentItem, type: onType }
             }
-            return item
+            return currentItem
           }
         }
       }
-      return item
+      return currentItem
     })
 
     this.furniture = layoutToFurnitureInstances(modifiedFurniture)
@@ -660,6 +678,56 @@ export class OfficeState {
     // Remove characters that finished despawn
     for (const id of toDelete) {
       this.characters.delete(id)
+    }
+
+    // Auto-animate furniture (per-item timers)
+    this.tickAutoAnimate(dt)
+  }
+
+  private tickAutoAnimate(dt: number): void {
+    let changed = false
+    for (const item of this.layout.furniture) {
+      const seq = getAnimSequence(item.type)
+      if (seq && seq.length >= 2) {
+        // Multi-frame animation via animSequence
+        let state = this.autoAnimateState.get(item.uid)
+        if (!state) {
+          state = { frameIdx: 0, timer: 0 }
+          this.autoAnimateState.set(item.uid, state)
+        }
+
+        state.timer += dt
+        const interval = getAnimInterval(item.type)
+        if (state.timer >= interval) {
+          state.timer -= interval
+          state.frameIdx = (state.frameIdx + 1) % seq.length
+          this.autoAnimateOverrides.set(item.uid, seq[state.frameIdx])
+          changed = true
+        }
+      } else {
+        // Legacy 2-frame toggle for items with autoAnimate but no animSequence
+        const currentType = this.autoAnimateOverrides.get(item.uid) ?? item.type
+        if (!isAutoAnimated(item.type) && !isAutoAnimated(currentType)) continue
+        let state = this.autoAnimateState.get(item.uid)
+        if (!state) {
+          state = { frameIdx: 0, timer: 0 }
+          this.autoAnimateState.set(item.uid, state)
+        }
+
+        state.timer += dt
+        const interval = getAnimInterval(item.type)
+        if (state.timer >= interval) {
+          state.timer -= interval
+          const toggled = getToggledType(currentType)
+          if (toggled) {
+            this.autoAnimateOverrides.set(item.uid, toggled)
+            changed = true
+          }
+        }
+      }
+    }
+    if (changed) {
+      this.rebuildFurnitureInstances()
     }
   }
 

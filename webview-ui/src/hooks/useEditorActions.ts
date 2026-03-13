@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import type { OfficeState } from '../office/engine/officeState.js'
 import type { EditorState } from '../office/editor/editorState.js'
-import { EditTool } from '../office/types.js'
+import { EditTool, TILE_SIZE } from '../office/types.js'
 import { TileType } from '../office/types.js'
 import type { OfficeLayout, EditTool as EditToolType, TileType as TileTypeVal, FloorColor, PlacedFurniture } from '../office/types.js'
 import { paintTile, placeFurniture, removeFurniture, moveFurniture, rotateFurniture, toggleFurnitureState, canPlaceFurniture, getWallPlacementRow, expandLayout } from '../office/editor/editorActions.js'
@@ -56,7 +56,18 @@ export function useEditorActions(
   // Called by useExtensionMessages on layoutLoaded to set the initial checkpoint
   const setLastSavedLayout = useCallback((layout: OfficeLayout) => {
     lastSavedLayoutRef.current = structuredClone(layout)
-  }, [])
+    // Reset camera pan so the new layout is centered in the viewport
+    panRef.current = { x: 0, y: 0 }
+    // Clear camera follow so stale character positions don't shift the view
+    getOfficeState().cameraFollowId = null
+    // Auto-fit zoom: ensure map fills viewport vertically using actual canvas size
+    const canvas = document.querySelector('canvas')
+    if (canvas && canvas.height > 0 && layout.rows > 0) {
+      const fitZoom = Math.ceil(canvas.height / (layout.rows * TILE_SIZE))
+      const newZoom = Math.max(defaultZoom(), Math.min(ZOOM_MAX, fitZoom))
+      setZoom(newZoom)
+    }
+  }, [getOfficeState])
 
   // Debounced layout save
   const saveLayout = useCallback((layout: OfficeLayout) => {

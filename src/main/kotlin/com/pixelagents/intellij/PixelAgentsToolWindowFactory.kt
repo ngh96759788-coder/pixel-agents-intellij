@@ -79,6 +79,7 @@ class PixelAgentsPanel(
 
     private var webviewDir: File? = null
     private var assetsDir: File? = null
+    private val assetLoadLock = Object() // Prevents race between loadAndSendAssets and setTheme
 
     init {
         LOG.info("Initializing PixelAgentsPanel")
@@ -125,7 +126,7 @@ class PixelAgentsPanel(
             // JCEF often reports devicePixelRatio=1 on HiDPI displays.
             val osScale = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
                 .defaultScreenDevice.defaultConfiguration.defaultTransform.scaleX
-            val url = "${indexFile.toURI()}?dpr=$osScale"
+            val url = "${indexFile.toURI()}?dpr=$osScale&_cb=${System.currentTimeMillis()}"
             LOG.info("Loading webview from: $url (OS DPR=$osScale)")
             browser.loadURL(url)
         } else {
@@ -216,11 +217,15 @@ class PixelAgentsPanel(
                 @Suppress("UNCHECKED_CAST")
                 val layout = message["layout"] as? Map<String, Any?>
                 if (layout != null) {
-                    layoutPersistence.markOwnWrite()
-                    layoutPersistence.writeLayoutToFile(layout)
-                    // Also save to theme-specific file
-                    val themeLayoutFile = Constants.THEME_LAYOUT_FILES[settings.theme]
-                    if (themeLayoutFile != null && themeLayoutFile != "layout.json") {
+                    val currentTheme = settings.theme
+                    if (currentTheme == Constants.THEME_DEFAULT) {
+                        // Default theme: write to layout.json (the canonical file)
+                        layoutPersistence.markOwnWrite()
+                        layoutPersistence.writeLayoutToFile(layout)
+                    }
+                    // Always save to theme-specific file
+                    val themeLayoutFile = Constants.THEME_LAYOUT_FILES[currentTheme]
+                    if (themeLayoutFile != null) {
                         layoutPersistence.writeThemeLayoutToFile(layout, themeLayoutFile)
                     }
                 }
@@ -243,69 +248,84 @@ class PixelAgentsPanel(
             "setTheme" -> {
                 val theme = message["theme"] as? String ?: Constants.THEME_DEFAULT
                 val validTheme = if (theme in Constants.VALID_THEMES) theme else Constants.THEME_DEFAULT
-                LOG.info("Theme changed to: $validTheme")
                 val previousTheme = settings.theme
+                if (validTheme == previousTheme) return
+                LOG.info("Theme changed: $previousTheme -> $validTheme")
+
+                // 1. Save current layout to previous theme's file SYNCHRONOUSLY
+                //    (before changing settings.theme, so saveLayout messages still write
+                //    to the correct theme file during the async asset reload)
+                val prevLayoutFile = Constants.THEME_LAYOUT_FILES[previousTheme] ?: "layout-default.json"
+                // Read from the correct source for the previous theme:
+                // - Default theme: layout.json is canonical
+                // - Other themes: use their own theme file (NOT layout.json, which has office data)
+                val currentLayout = if (previousTheme == Constants.THEME_DEFAULT) {
+                    layoutPersistence.readLayoutFromFile()
+                } else {
+                    layoutPersistence.readThemeLayoutFromFile(prevLayoutFile)
+                }
+                if (currentLayout != null) {
+                    layoutPersistence.writeThemeLayoutToFile(currentLayout, prevLayoutFile)
+                    LOG.info("Saved layout to $prevLayoutFile")
+                }
+
+                // 2. NOW change the theme setting
                 settings.theme = validTheme
-                // Reload all themed assets on background thread
+
+                // 3. Reload all themed assets on background thread
                 val dir = assetsDir
                 if (dir != null) {
                     ApplicationManager.getApplication().executeOnPooledThread {
-                        // 1. Save current layout to previous theme's file
-                        val prevLayoutFile = Constants.THEME_LAYOUT_FILES[previousTheme] ?: "layout.json"
-                        val currentLayout = layoutPersistence.readThemeLayoutFromFile(prevLayoutFile)
-                            ?: layoutPersistence.readLayoutFromFile()
-                        if (currentLayout != null) {
-                            layoutPersistence.writeThemeLayoutToFile(currentLayout, prevLayoutFile)
-                        }
+                        synchronized(assetLoadLock) {
+                            val charSubdir = Constants.THEME_CHAR_DIRS[validTheme] ?: "characters"
+                            val floorFile = Constants.THEME_FLOOR_FILES[validTheme] ?: "floors.png"
+                            val wallFile = Constants.THEME_WALL_FILES[validTheme] ?: "walls.png"
+                            val furnitureDir = Constants.THEME_FURNITURE_DIRS[validTheme] ?: "furniture"
 
-                        // 2. Reload all themed assets
-                        val charSubdir = Constants.THEME_CHAR_DIRS[validTheme] ?: "characters"
-                        val floorFile = Constants.THEME_FLOOR_FILES[validTheme] ?: "floors.png"
-                        val wallFile = Constants.THEME_WALL_FILES[validTheme] ?: "walls.png"
-                        val furnitureDir = Constants.THEME_FURNITURE_DIRS[validTheme] ?: "furniture"
-
-                        val charSprites = assetLoader.loadCharacterSprites(dir, charSubdir)
-                        if (charSprites != null) {
-                            bridge.sendToWebview("characterSpritesLoaded", mapOf("characters" to charSprites, "theme" to validTheme))
-                        }
-
-                        val floorTiles = assetLoader.loadFloorTiles(dir, floorFile)
-                        if (floorTiles != null) {
-                            bridge.sendToWebview("floorTilesLoaded", mapOf("sprites" to floorTiles))
-                        }
-
-                        val wallTiles = assetLoader.loadWallTiles(dir, wallFile)
-                        if (wallTiles != null) {
-                            bridge.sendToWebview("wallTilesLoaded", mapOf("sprites" to wallTiles))
-                        }
-
-                        val furniture = assetLoader.loadFurnitureAssets(dir, furnitureDir)
-                        if (furniture != null) {
-                            bridge.sendToWebview("furnitureAssetsLoaded", furniture)
-                        }
-
-                        // 3. Load theme layout (user-saved -> bundled default)
-                        val themeLayoutFile = Constants.THEME_LAYOUT_FILES[validTheme] ?: "layout.json"
-                        var themeLayout = layoutPersistence.readThemeLayoutFromFile(themeLayoutFile)
-                        if (themeLayout == null) {
-                            val defaultLayoutFile = Constants.THEME_DEFAULT_LAYOUTS[validTheme] ?: "default-layout.json"
-                            themeLayout = assetLoader.loadDefaultLayout(dir, defaultLayoutFile)
-                            if (themeLayout != null) {
-                                layoutPersistence.writeThemeLayoutToFile(themeLayout, themeLayoutFile)
+                            val charSprites = assetLoader.loadCharacterSprites(dir, charSubdir)
+                            if (charSprites != null) {
+                                bridge.sendToWebview("characterSpritesLoaded", mapOf("characters" to charSprites, "theme" to validTheme))
                             }
-                        }
 
-                        // 4. Write to main layout.json for watcher sync
-                        if (themeLayout != null) {
-                            layoutPersistence.markOwnWrite()
-                            layoutPersistence.writeLayoutToFile(themeLayout)
-                        }
+                            val floorTiles = assetLoader.loadFloorTiles(dir, floorFile)
+                            if (floorTiles != null) {
+                                bridge.sendToWebview("floorTilesLoaded", mapOf("sprites" to floorTiles))
+                            }
 
-                        // 5. Send layout + themeChanged to webview
-                        if (themeLayout != null) {
-                            bridge.sendToWebview("layoutLoaded", mapOf("layout" to themeLayout))
+                            val wallTiles = assetLoader.loadWallTiles(dir, wallFile)
+                            if (wallTiles != null) {
+                                bridge.sendToWebview("wallTilesLoaded", mapOf("sprites" to wallTiles))
+                            }
+
+                            val furniture = assetLoader.loadFurnitureAssets(dir, furnitureDir)
+                            if (furniture != null) {
+                                bridge.sendToWebview("furnitureAssetsLoaded", furniture)
+                            }
+
+                            // 4. Load theme layout (user-saved -> bundled default)
+                            val themeLayoutFile = Constants.THEME_LAYOUT_FILES[validTheme] ?: "layout-default.json"
+                            var themeLayout = layoutPersistence.readThemeLayoutFromFile(themeLayoutFile)
+                            if (themeLayout == null) {
+                                val defaultLayoutFile = Constants.THEME_DEFAULT_LAYOUTS[validTheme] ?: "default-layout.json"
+                                themeLayout = assetLoader.loadDefaultLayout(dir, defaultLayoutFile)
+                                if (themeLayout != null) {
+                                    layoutPersistence.writeThemeLayoutToFile(themeLayout, themeLayoutFile)
+                                }
+                            }
+                            LOG.info("Loaded layout for theme $validTheme from ${if (themeLayout != null) themeLayoutFile else "bundled default"}")
+
+                            // 5. For default theme, sync to layout.json; for others, only use theme file
+                            if (validTheme == Constants.THEME_DEFAULT && themeLayout != null) {
+                                layoutPersistence.markOwnWrite()
+                                layoutPersistence.writeLayoutToFile(themeLayout)
+                            }
+
+                            // 6. Send layout + themeChanged to webview
+                            if (themeLayout != null) {
+                                bridge.sendToWebview("layoutLoaded", mapOf("layout" to themeLayout))
+                            }
+                            bridge.sendToWebview("themeChanged", mapOf("theme" to validTheme))
                         }
-                        bridge.sendToWebview("themeChanged", mapOf("theme" to validTheme))
                     }
                 }
             }
@@ -343,25 +363,59 @@ class PixelAgentsPanel(
     }
 
     private fun loadAndSendAssets() {
-        // Find assets directory
-        val dir = findAssetsDirectory()
-        this.assetsDir = dir
-        if (dir != null) {
-            // Load with themed assets
-            val currentTheme = settings.theme
-            val charSubdir = Constants.THEME_CHAR_DIRS[currentTheme] ?: "characters"
-            val floorFile = Constants.THEME_FLOOR_FILES[currentTheme] ?: "floors.png"
-            val wallFile = Constants.THEME_WALL_FILES[currentTheme] ?: "walls.png"
-            val furnitureDir = Constants.THEME_FURNITURE_DIRS[currentTheme] ?: "furniture"
-            val defaultLayoutFile = Constants.THEME_DEFAULT_LAYOUTS[currentTheme] ?: "default-layout.json"
-            assetLoader.loadAllAssets(dir, charSubdir, floorFile, wallFile, currentTheme, furnitureDir, defaultLayoutFile) { type, payload ->
-                bridge.sendToWebview(type, payload)
-            }
-        }
+        synchronized(assetLoadLock) {
+            // Find assets directory
+            val dir = findAssetsDirectory()
+            this.assetsDir = dir
 
-        // Send layout
-        val layout = layoutPersistence.migrateAndLoadLayout(settings, assetLoader.defaultLayout)
-        bridge.sendToWebview("layoutLoaded", mapOf("layout" to layout))
+            // Capture theme ONCE to avoid race with setTheme
+            val currentTheme = settings.theme
+
+            if (dir != null) {
+                // Load with themed assets
+                val charSubdir = Constants.THEME_CHAR_DIRS[currentTheme] ?: "characters"
+                val floorFile = Constants.THEME_FLOOR_FILES[currentTheme] ?: "floors.png"
+                val wallFile = Constants.THEME_WALL_FILES[currentTheme] ?: "walls.png"
+                val furnitureDir = Constants.THEME_FURNITURE_DIRS[currentTheme] ?: "furniture"
+                val defaultLayoutFile = Constants.THEME_DEFAULT_LAYOUTS[currentTheme] ?: "default-layout.json"
+                assetLoader.loadAllAssets(dir, charSubdir, floorFile, wallFile, currentTheme, furnitureDir, defaultLayoutFile) { type, payload ->
+                    bridge.sendToWebview(type, payload)
+                }
+            }
+
+            // Send layout — theme-aware (using same captured currentTheme)
+            var layout: Map<String, Any?>? = null
+
+            // For non-default themes: try theme-specific saved layout → bundled themed default
+            if (currentTheme != Constants.THEME_DEFAULT) {
+                val themeLayoutFile = Constants.THEME_LAYOUT_FILES[currentTheme] ?: "layout-default.json"
+                layout = layoutPersistence.readThemeLayoutFromFile(themeLayoutFile)
+                if (layout != null) {
+                    val rows = (layout["rows"] as? Number)?.toInt()
+                    val cols = (layout["cols"] as? Number)?.toInt()
+                    LOG.info("[Zoo Debug] Loaded SAVED layout from $themeLayoutFile: ${cols}x${rows}")
+                }
+                if (layout == null) {
+                    // Use the themed bundled default (e.g. default-layout-alien.json)
+                    layout = assetLoader.defaultLayout
+                    if (layout != null) {
+                        val rows = (layout["rows"] as? Number)?.toInt()
+                        val cols = (layout["cols"] as? Number)?.toInt()
+                        LOG.info("[Zoo Debug] Using BUNDLED default layout: ${cols}x${rows}")
+                        layoutPersistence.writeThemeLayoutToFile(layout, themeLayoutFile)
+                    }
+                }
+                // NOTE: Do NOT write themed layout to layout.json — it corrupts the office layout.
+                // Each theme has its own file (layout-zoo.json, layout-alien.json, etc.)
+            }
+
+            // Default theme or fallback: use standard migration path
+            if (layout == null) {
+                layout = layoutPersistence.migrateAndLoadLayout(settings, assetLoader.defaultLayout)
+            }
+
+            bridge.sendToWebview("layoutLoaded", mapOf("layout" to layout))
+        }
     }
 
     private fun findAssetsDirectory(): File? {

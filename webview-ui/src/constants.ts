@@ -68,6 +68,9 @@ export const SELECTION_HIGHLIGHT_COLOR = '#007fd4'
 export const DELETE_BUTTON_BG = 'rgba(200, 50, 50, 0.85)'
 export const ROTATE_BUTTON_BG = 'rgba(50, 120, 200, 0.85)'
 
+// ── Map Positioning ─────────────────────────────────────────
+export const MAP_TOP_OFFSET_PX = -4
+
 // ── Camera ───────────────────────────────────────────────────
 export const CAMERA_FOLLOW_LERP = 0.1
 export const CAMERA_FOLLOW_SNAP_THRESHOLD = 0.5
@@ -114,6 +117,9 @@ export const THEME_SWITCH_SWEEP_START_HZ = 200
 export const THEME_SWITCH_SWEEP_END_HZ = 800
 export const THEME_SWITCH_DURATION_SEC = 0.3
 export const THEME_SWITCH_VOLUME = 0.08
+
+// ── Auto-Animate (furniture periodic animation) ──────────────
+export const AUTO_ANIMATE_INTERVAL_SEC = 2.5
 
 // ── Game Logic ───────────────────────────────────────────────
 export const MAX_DELTA_TIME_SEC = 0.1

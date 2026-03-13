@@ -101,12 +101,21 @@ class AssetLoader {
             val charDir = File(assetsDir, charSubdir)
             val characters = mutableListOf<Map<String, Any>>()
 
-            for (ci in 0 until Constants.CHAR_COUNT) {
+            // Dynamically detect available character files (char_0.png, char_1.png, ...)
+            var ci = 0
+            while (true) {
                 val file = File(charDir, "char_$ci.png")
-                if (!file.exists()) {
-                    println("[AssetLoader] No character sprite found at: ${file.absolutePath}")
-                    return null
-                }
+                if (!file.exists()) break
+                ci++
+            }
+            val charCount = ci
+            if (charCount == 0) {
+                println("[AssetLoader] No character sprites found in: ${charDir.absolutePath}")
+                return null
+            }
+
+            for (ci in 0 until charCount) {
+                val file = File(charDir, "char_$ci.png")
 
                 val img = ImageIO.read(file)
                 val charData = mutableMapOf<String, Any>()
@@ -195,13 +204,25 @@ class AssetLoader {
     @Suppress("UNCHECKED_CAST")
     fun loadFurnitureAssets(assetsDir: File, furnitureDir: String = "furniture"): Map<String, Any?>? {
         try {
-            val catalogFile = File(assetsDir, "$furnitureDir/furniture-catalog.json")
+            var effectiveDir = furnitureDir
+            val catalogFile = File(assetsDir, "$effectiveDir/furniture-catalog.json")
             if (!catalogFile.exists()) {
-                println("[AssetLoader] No furniture catalog found at: ${catalogFile.absolutePath}")
-                return null
+                if (effectiveDir != "furniture") {
+                    println("[AssetLoader] No furniture catalog for theme dir '$effectiveDir', falling back to 'furniture'")
+                    effectiveDir = "furniture"
+                    val fallbackCatalog = File(assetsDir, "$effectiveDir/furniture-catalog.json")
+                    if (!fallbackCatalog.exists()) {
+                        println("[AssetLoader] No furniture catalog found at: ${fallbackCatalog.absolutePath}")
+                        return null
+                    }
+                } else {
+                    println("[AssetLoader] No furniture catalog found at: ${catalogFile.absolutePath}")
+                    return null
+                }
             }
 
-            val catalogContent = catalogFile.readText()
+            val effectiveCatalogFile = File(assetsDir, "$effectiveDir/furniture-catalog.json")
+            val catalogContent = effectiveCatalogFile.readText()
             val catalogData = gson.fromJson(catalogContent, Map::class.java) as Map<String, Any?>
             val catalog = catalogData["assets"] as? List<Map<String, Any?>> ?: emptyList()
 

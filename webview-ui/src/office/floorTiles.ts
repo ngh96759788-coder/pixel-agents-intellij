@@ -60,7 +60,7 @@ export function getAllFloorSprites(): SpriteData[] {
  * then brightness/contrast adjustment.
  */
 export function getColorizedFloorSprite(patternIndex: number, color: FloorColor): SpriteData {
-  const key = `floor-${patternIndex}-${color.h}-${color.s}-${color.b}-${color.c}`
+  const key = `floor-${patternIndex}-${color.h}-${color.s}-${color.b}-${color.c}-${color.colorize ?? true}`
 
   const base = getFloorSprite(patternIndex)
   if (!base) {
@@ -69,6 +69,7 @@ export function getColorizedFloorSprite(patternIndex: number, color: FloorColor)
     return err
   }
 
-  // Floor tiles are always colorized (grayscale patterns need Photoshop-style Colorize)
-  return getColorizedSprite(key, base, { ...color, colorize: true })
+  // Colorize mode: grayscale -> HSL (default for floor tiles)
+  // Adjust mode: preserves original pixel colors (for pre-colored theme tiles)
+  return getColorizedSprite(key, base, color)
 }

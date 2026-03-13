@@ -38,6 +38,7 @@ import {
   SELECTION_HIGHLIGHT_COLOR,
   DELETE_BUTTON_BG,
   ROTATE_BUTTON_BG,
+  MAP_TOP_OFFSET_PX,
 } from '../../constants.js'
 
 // ── Render functions ────────────────────────────────────────────
@@ -542,18 +543,17 @@ export function renderFrame(
   layoutCols?: number,
   layoutRows?: number,
 ): { offsetX: number; offsetY: number } {
-  // Clear
-  ctx.clearRect(0, 0, canvasWidth, canvasHeight)
-
   // Use layout dimensions (fallback to tileMap size)
   const cols = layoutCols ?? (tileMap.length > 0 ? tileMap[0].length : 0)
   const rows = layoutRows ?? tileMap.length
 
-  // Center map in viewport + pan offset (integer device pixels)
+  // Clear
+  ctx.clearRect(0, 0, canvasWidth, canvasHeight)
+
+  // Center map horizontally, top-align vertically + pan offset (integer device pixels)
   const mapW = cols * TILE_SIZE * zoom
-  const mapH = rows * TILE_SIZE * zoom
   const offsetX = Math.floor((canvasWidth - mapW) / 2) + Math.round(panX)
-  const offsetY = Math.floor((canvasHeight - mapH) / 2) + Math.round(panY)
+  const offsetY = MAP_TOP_OFFSET_PX * zoom + Math.round(panY)
 
   // Draw tiles (floor + wall base color)
   renderTileGrid(ctx, tileMap, offsetX, offsetY, zoom, tileColors, layoutCols)

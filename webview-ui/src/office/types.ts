@@ -123,6 +123,12 @@ export interface FurnitureCatalogEntry {
   renderOffsetY?: number
   /** Whether this item can be placed on wall tiles */
   canPlaceOnWalls?: boolean
+  /** Whether this furniture auto-animates (periodic state toggle) */
+  autoAnimate?: boolean
+  /** Animation interval in seconds (default from constants) */
+  animIntervalSec?: number
+  /** Ordered list of type IDs forming the animation loop (ping-pong or cyclic) */
+  animSequence?: string[]
 }
 
 export interface PlacedFurniture {

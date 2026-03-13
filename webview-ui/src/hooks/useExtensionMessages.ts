@@ -6,6 +6,7 @@ import { migrateLayoutColors } from '../office/layout/layoutSerializer.js'
 import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js'
 import { setFloorSprites } from '../office/floorTiles.js'
 import { setWallSprites } from '../office/wallTiles.js'
+import { clearColorizeCache } from '../office/colorize.js'
 import { setCharacterTemplates } from '../office/sprites/spriteData.js'
 import { vscode } from '../vscodeApi.js'
 import { playDoneSound, playSpawnSound, playDespawnSound, playThemeSwitchSound, setSoundEnabled } from '../notificationSound.js'
@@ -33,6 +34,7 @@ export interface FurnitureAsset {
   groupId?: string
   canPlaceOnSurfaces?: boolean
   backgroundTiles?: number
+  animSequence?: string[]
 }
 
 export interface ExtensionMessageState {
@@ -324,12 +326,12 @@ export function useExtensionMessages(
       } else if (msg.type === 'characterSpritesLoaded') {
         const characters = msg.characters as Array<{ down: string[][][]; up: string[][][]; right: string[][][] }>
         console.log(`[Webview] Received ${characters.length} pre-colored character sprites`)
-        setCharacterTemplates(characters)
+        const theme = (msg.theme as string) ?? 'default'
+        setCharacterTemplates(characters, theme)
         // Force all existing characters to refresh their cached sprites
         os.refreshCharacterSprites()
         // Update theme (characterSpritesLoaded fires on theme change)
         if (msg.theme) {
-          const theme = msg.theme as string
           setCurrentTheme(theme)
         }
       } else if (msg.type === 'floorTilesLoaded') {
@@ -355,12 +357,28 @@ export function useExtensionMessages(
           // Build dynamic catalog immediately so getCatalogEntry() works when layoutLoaded arrives next
           buildDynamicCatalog({ catalog, sprites })
           setLoadedAssets({ catalog, sprites })
+          // Rebuild blocked tiles if layout was already loaded (fixes race where
+          // layoutLoaded arrives before furnitureAssetsLoaded, causing zoo fences
+          // to be skipped because getCatalogEntry returned null)
+          const currentLayout = os.getLayout()
+          if (currentLayout && currentLayout.furniture.length > 0) {
+            os.rebuildFromLayout(currentLayout)
+          }
         } catch (err) {
           console.error(`❌ Webview: Error processing furnitureAssetsLoaded:`, err)
         }
       } else if (msg.type === 'themeChanged') {
         const theme = msg.theme as string
+        console.log(`[Webview] Theme changed to: ${theme}, forcing cache clear + layout rebuild`)
         setCurrentTheme(theme)
+        // Nuclear cache clear — ensure all colorized tiles use the new sprites
+        clearColorizeCache()
+        // Force rebuild to re-render with new floor/wall sprites
+        const currentLayout = os.getLayout()
+        if (currentLayout) {
+          os.rebuildFromLayout(currentLayout)
+          onLayoutLoaded?.(currentLayout)
+        }
         playThemeSwitchSound()
       }
     }

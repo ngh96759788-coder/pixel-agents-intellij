@@ -43,6 +43,9 @@ export interface FurnitureAsset {
   renderOffsetY?: number
   orientation?: string
   state?: string
+  autoAnimate?: boolean
+  animIntervalSec?: number
+  animSequence?: string[]
 }
 
 export interface LoadedAssets {
@@ -59,12 +62,20 @@ export async function loadFurnitureAssets(
 ): Promise<LoadedAssets | null> {
   try {
     console.log(`[AssetLoader] workspaceRoot received: "${workspaceRoot}"`)
-    const catalogPath = path.join(workspaceRoot, 'assets', furnitureDir, 'furniture-catalog.json')
+    let effectiveDir = furnitureDir
+    let catalogPath = path.join(workspaceRoot, 'assets', effectiveDir, 'furniture-catalog.json')
     console.log(`[AssetLoader] Attempting to load from: ${catalogPath}`)
 
     if (!fs.existsSync(catalogPath)) {
-      console.log('ℹ️  No furniture catalog found at:', catalogPath)
-      return null
+      if (effectiveDir !== 'furniture') {
+        console.log(`[AssetLoader] No furniture catalog for theme dir '${effectiveDir}', falling back to 'furniture'`)
+        effectiveDir = 'furniture'
+        catalogPath = path.join(workspaceRoot, 'assets', effectiveDir, 'furniture-catalog.json')
+      }
+      if (!fs.existsSync(catalogPath)) {
+        console.log('ℹ️  No furniture catalog found at:', catalogPath)
+        return null
+      }
     }
 
     console.log('📦 Loading furniture assets from:', catalogPath)

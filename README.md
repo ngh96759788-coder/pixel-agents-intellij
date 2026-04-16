@@ -1,11 +1,10 @@
-# Pixel Agents
+# Pixel Agents for IntelliJ
 
-A VS Code extension that turns your AI coding agents into animated pixel art characters in a virtual office.
+An IntelliJ plugin that turns your Claude Code terminal sessions into animated pixel art characters in a virtual office.
 
 Each Claude Code terminal you open spawns a character that walks around, sits at desks, and visually reflects what the agent is doing — typing when writing code, reading when searching files, waiting when it needs your attention.
 
-This is the source code for the free [Pixel Agents extension for VS Code](https://marketplace.visualstudio.com/items?itemName=pablodelucca.pixel-agents) — you can install it directly from the marketplace with the full furniture catalog included.
-
+Ported from [Pixel Agents for VS Code](https://github.com/pablodelucca/pixel-agents) by Pablo De Lucca, with additional features for the IntelliJ Platform.
 
 ![Pixel Agents screenshot](webview-ui/public/Screenshot.jpg)
 
@@ -13,41 +12,37 @@ This is the source code for the free [Pixel Agents extension for VS Code](https:
 
 - **One agent, one character** — every Claude Code terminal gets its own animated character
 - **Live activity tracking** — characters animate based on what the agent is actually doing (writing, reading, running commands)
-- **Office layout editor** — design your office with floors, walls, and furniture using a built-in editor
+- **Sub-agent visualization** — Task/Agent sub-agents spawn as separate characters, including async background agents with independent JSONL tracking
+- **Office layout editor** — design your office with floors, walls, and 80+ furniture items
+- **Multiple themes** — default office, alien, cat, and zoo themes with unique characters and furniture
 - **Speech bubbles** — visual indicators when an agent is waiting for input or needs permission
 - **Sound notifications** — optional chime when an agent finishes its turn
-- **Sub-agent visualization** — Task tool sub-agents spawn as separate characters linked to their parent
-- **Persistent layouts** — your office design is saved and shared across VS Code windows
-- **Diverse characters** — 6 diverse characters.
-
-<p align="center">
-  <img src="webview-ui/public/characters.png" alt="Pixel Agents characters" width="320" height="72" style="image-rendering: pixelated;">
-</p>
+- **Animated furniture** — wall clocks tick, desk fans spin, water coolers bubble
+- **Persistent layouts** — your office design is saved across IDE restarts
+- **External session adoption** — automatically detects Claude Code sessions started outside the plugin
+- **Diverse characters** — 6 unique characters per theme with automatic palette diversity for sub-agents
 
 ## Requirements
 
-- VS Code 1.109.0 or later
+- IntelliJ IDEA 2024.2+ (or any JetBrains IDE based on IntelliJ Platform 2024.2+)
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and configured
+- JBR (JetBrains Runtime) with JCEF support (included by default)
 
-## Getting Started
+## Installation
 
-If you just want to use Pixel Agents, the easiest way is to download the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=pablodelucca.pixel-agents). If you want to play with the code, develop, or contribute, then:
+### From JetBrains Marketplace
 
-### Install from source
+Search for **Pixel Agents** in Settings > Plugins > Marketplace.
 
-```bash
-git clone https://github.com/pablodelucca/pixel-agents.git
-cd pixel-agents
-npm install
-cd webview-ui && npm install && cd ..
-npm run build
-```
+### From ZIP
 
-Then press **F5** in VS Code to launch the Extension Development Host.
+1. Download the latest `pixel-agents-intellij-x.x.x.zip` from [Releases](https://github.com/ngh96759788-coder/pixel-agents-intellij/releases)
+2. Settings > Plugins > Gear icon > Install Plugin from Disk
+3. Select the ZIP file and restart the IDE
 
-### Usage
+## Usage
 
-1. Open the **Pixel Agents** panel (it appears in the bottom panel area alongside your terminal)
+1. Open the **Pixel Agents** tool window (bottom panel)
 2. Click **+ Agent** to spawn a new Claude Code terminal and its character
 3. Start coding with Claude — watch the character react in real time
 4. Click a character to select it, then click a seat to reassign it
@@ -57,76 +52,84 @@ Then press **F5** in VS Code to launch the Extension Development Host.
 
 The built-in editor lets you design your office:
 
-- **Floor** — Full HSB color control
+- **Floor** — 7 patterns with full HSBC color control
 - **Walls** — Auto-tiling walls with color customization
+- **Furniture** — 80+ items across desks, chairs, electronics, decor, and wall items
 - **Tools** — Select, paint, erase, place, eyedropper, pick
 - **Undo/Redo** — 50 levels with Ctrl+Z / Ctrl+Y
 - **Export/Import** — Share layouts as JSON files via the Settings modal
 
-The grid is expandable up to 64×64 tiles. Click the ghost border outside the current grid to grow it.
+The grid is expandable up to 64x64 tiles. Click the ghost border outside the current grid to grow it.
 
-### Office Assets
+## Building from Source
 
-The office tileset used in this project and available via the extension is **[Office Interior Tileset (16x16)](https://donarg.itch.io/officetileset)** by **Donarg**, available on itch.io for **$2 USD**.
+### Prerequisites
 
-This is the only part of the project that is not freely available. The tileset is not included in this repository due to its license. To use Pixel Agents locally with the full set of office furniture and decorations, purchase the tileset and run the asset import pipeline:
+- JDK 21+
+- Node.js (LTS recommended)
+- Gradle (wrapper included)
+
+### Build
+
+```bash
+git clone https://github.com/ngh96759788-coder/pixel-agents-intellij.git
+cd pixel-agents-intellij
+
+# Build webview (must run before Gradle)
+cd webview-ui && npm install && npm run build && cd ..
+
+# Build plugin
+./gradlew buildPlugin
+```
+
+The plugin ZIP will be at `build/distributions/pixel-agents-intellij-x.x.x.zip`.
+
+### Development
+
+```bash
+# Run the IDE with plugin loaded for testing
+./gradlew runIde
+```
+
+Or open the project in IntelliJ IDEA and use the pre-configured Run Configuration.
+
+### Tests
+
+```bash
+# Webview unit tests
+cd webview-ui && npx vitest run
+```
+
+## How It Works
+
+Pixel Agents watches Claude Code's JSONL transcript files at `~/.claude/projects/<project-hash>/` to track what each agent is doing. When an agent uses a tool (like writing a file or running a command), the plugin detects it and updates the character's animation accordingly. No modifications to Claude Code are needed — it's purely observational.
+
+For async sub-agents (background Agent tool), the plugin also monitors separate JSONL files at `<session-id>/subagents/agent-<id>.jsonl` to track their independent tool activity.
+
+The webview runs a lightweight game loop with canvas rendering, BFS pathfinding, and a character state machine (idle -> walk -> type/read). Everything is pixel-perfect at integer zoom levels.
+
+## Tech Stack
+
+- **Plugin**: Kotlin, IntelliJ Platform SDK, JCEF (Chromium Embedded Framework)
+- **Webview**: React 19, TypeScript, Vite, Canvas 2D
+
+## Office Assets
+
+The office tileset is [Office Interior Tileset (16x16)](https://donarg.itch.io/officetileset) by **Donarg** on itch.io. This tileset is not included in the repository due to its license. The plugin works without it using built-in default assets. To use the full furniture catalog, purchase the tileset and run the asset import pipeline:
 
 ```bash
 npm run import-tileset
 ```
 
-Fair warning: the import pipeline is not exactly straightforward — the out-of-the-box tileset assets aren't the easiest to work with, and while I've done my best to make the process as smooth as possible, it may require some manual tweaking. If you have experience creating pixel art office assets and would like to contribute freely usable tilesets for the community, that would be hugely appreciated.
+## Attribution
 
-The extension will still work without the tileset — you'll get the default characters and basic layout, but the full furniture catalog requires the imported assets.
+This project is an IntelliJ Platform port of [Pixel Agents](https://github.com/pablodelucca/pixel-agents) by [Pablo De Lucca](https://github.com/pablodelucca), originally built as a VS Code extension. The core concepts — JSONL transcript watching, pixel art office rendering, character state machine — originate from the original project.
 
-## How It Works
+## Contributing
 
-Pixel Agents watches Claude Code's JSONL transcript files to track what each agent is doing. When an agent uses a tool (like writing a file or running a command), the extension detects it and updates the character's animation accordingly. No modifications to Claude Code are needed — it's purely observational.
-
-The webview runs a lightweight game loop with canvas rendering, BFS pathfinding, and a character state machine (idle → walk → type/read). Everything is pixel-perfect at integer zoom levels.
-
-## Tech Stack
-
-- **Extension**: TypeScript, VS Code Webview API, esbuild
-- **Webview**: React 19, TypeScript, Vite, Canvas 2D
-
-## Known Limitations
-
-- **Agent-terminal sync** — the way agents are connected to Claude Code terminal instances is not super robust and sometimes desyncs, especially when terminals are rapidly opened/closed or restored across sessions.
-- **Heuristic-based status detection** — Claude Code's JSONL transcript format does not provide clear signals for when an agent is waiting for user input or when it has finished its turn. The current detection is based on heuristics (idle timers, turn-duration events) and often misfires — agents may briefly show the wrong status or miss transitions.
-- **Windows-only testing** — the extension has only been tested on Windows 11. It may work on macOS or Linux, but there could be unexpected issues with file watching, paths, or terminal behavior on those platforms.
-
-## Roadmap
-
-There are several areas where contributions would be very welcome:
-
-- **Improve agent-terminal reliability** — more robust connection and sync between characters and Claude Code instances
-- **Better status detection** — find or propose clearer signals for agent state transitions (waiting, done, permission needed)
-- **Community assets** — freely usable pixel art tilesets or characters that anyone can use without purchasing third-party assets
-- **Agent creation and definition** — define agents with custom skills, system prompts, names, and skins before launching them
-- **Desks as directories** — click on a desk to select a working directory, drag and drop agents or click-to-assign to move them to specific desks/projects
-- **Claude Code agent teams** — native support for [agent teams](https://code.claude.com/docs/en/agent-teams), visualizing multi-agent coordination and communication
-- **Git worktree support** — agents working in different worktrees to avoid conflict from parallel work on the same files
-- **Support for other agentic frameworks** — [OpenCode](https://github.com/nichochar/opencode), or really any kind of agentic experiment you'd want to run inside a pixel art interface (see [simile.ai](https://simile.ai/) for inspiration)
-
-If any of these interest you, feel free to open an issue or submit a PR.
-
-## Contributions
-
-See [CONTRIBUTORS.md](CONTRIBUTORS.md) for instructions on how to contribute to this project.
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for instructions on how to contribute.
 
 Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
-
-## Supporting the Project
-
-If you find Pixel Agents useful, consider supporting its development:
-
-<a href="https://github.com/sponsors/pablodelucca">
-  <img src="https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?logo=github" alt="GitHub Sponsors">
-</a>
-<a href="https://ko-fi.com/pablodelucca">
-  <img src="https://img.shields.io/badge/Support-Ko--fi-ff5e5b?logo=ko-fi" alt="Ko-fi">
-</a>
 
 ## License
 

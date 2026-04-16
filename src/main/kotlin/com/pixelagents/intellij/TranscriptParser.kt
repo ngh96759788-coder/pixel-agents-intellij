@@ -9,10 +9,21 @@ class TranscriptParser(
     private val agents: ConcurrentHashMap<Int, AgentState>,
     private val timerManager: TimerManager,
 ) {
+    companion object {
+        /** Tool names that spawn sub-agent characters (Claude Code uses "Agent", legacy uses "Task") */
+        val SUBAGENT_TOOL_NAMES = setOf("Task", "Agent")
+    }
+
     private val gson = Gson()
     private val delayScheduler = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "PixelAgents-ToolDoneDelay").apply { isDaemon = true }
     }
+
+    /** Callback to start watching an async sub-agent's separate JSONL file. Set by FileWatcher. */
+    var onAsyncSubagentDetected: ((agentId: Int, parentToolId: String, jsonlPath: String) -> Unit)? = null
+
+    /** Callback to stop watching an async sub-agent's file once it finishes. */
+    var onAsyncSubagentFinished: ((agentId: Int, parentToolId: String) -> Unit)? = null
 
     fun formatToolStatus(toolName: String, input: Map<String, Any?>): String {
         fun base(p: Any?): String = if (p is String) File(p).name else ""
@@ -28,9 +39,11 @@ class TranscriptParser(
             "Grep" -> "Searching code"
             "WebFetch" -> "Fetching web content"
             "WebSearch" -> "Searching the web"
-            "Task" -> {
+            "Task", "Agent" -> {
                 val desc = input["description"] as? String ?: ""
-                if (desc.isNotEmpty()) "Subtask: ${if (desc.length > Constants.TASK_DESCRIPTION_DISPLAY_MAX_LENGTH) desc.take(Constants.TASK_DESCRIPTION_DISPLAY_MAX_LENGTH) + "\u2026" else desc}"
+                val subType = input["subagent_type"] as? String ?: ""
+                val prefix = if (subType.isNotEmpty()) "Subtask[$subType]: " else "Subtask: "
+                if (desc.isNotEmpty()) "$prefix${if (desc.length > Constants.TASK_DESCRIPTION_DISPLAY_MAX_LENGTH) desc.take(Constants.TASK_DESCRIPTION_DISPLAY_MAX_LENGTH) + "\u2026" else desc}"
                 else "Running subtask"
             }
             "AskUserQuestion" -> "Waiting for your answer"
@@ -115,18 +128,34 @@ class TranscriptParser(
             val hasToolResult = blocks.any { it["type"] == "tool_result" }
 
             if (hasToolResult) {
+                // Detect async Agent launch: tool_result arrives immediately with {isAsync: true, agentId: "..."}
+                // but the real sub-agent work happens in a separate JSONL file.
+                val toolUseResult = record["toolUseResult"] as? Map<String, Any?>
+                val isAsyncLaunch = (toolUseResult?.get("isAsync") as? Boolean) == true
+                val asyncAgentId = toolUseResult?.get("agentId") as? String
+
                 for (block in blocks) {
                     if (block["type"] == "tool_result" && block["tool_use_id"] != null) {
                         val completedToolId = block["tool_use_id"] as String
+                        val wasSubagentTool = agent.activeToolNames[completedToolId] in SUBAGENT_TOOL_NAMES
 
-                        // If completed tool was a Task, clear its subagent tools
-                        if (agent.activeToolNames[completedToolId] == "Task") {
+                        if (isAsyncLaunch && !asyncAgentId.isNullOrBlank() && wasSubagentTool) {
+                            // Async sub-agent just launched — don't clear the character.
+                            // Start watching its separate JSONL so tool activity animates properly.
+                            registerAsyncSubagent(agentId, agent, completedToolId, asyncAgentId)
+                        } else if (wasSubagentTool) {
+                            // Sync Task/Agent completed — clear sub-agent tools as before
                             agent.activeSubagentToolIds.remove(completedToolId)
                             agent.activeSubagentToolNames.remove(completedToolId)
                             sendToWebview("subagentClear", mapOf(
                                 "id" to agentId,
                                 "parentToolId" to completedToolId,
                             ))
+                        }
+
+                        // Also clear any async sub-agent tied to this parent tool id (sync completion path)
+                        if (!isAsyncLaunch) {
+                            clearAsyncSubagent(agentId, agent, completedToolId)
                         }
 
                         agent.activeToolIds.remove(completedToolId)
@@ -167,9 +196,17 @@ class TranscriptParser(
             agent.activeToolIds.clear()
             agent.activeToolStatuses.clear()
             agent.activeToolNames.clear()
-            agent.activeSubagentToolIds.clear()
-            agent.activeSubagentToolNames.clear()
-            sendToWebview("agentToolsClear", mapOf("id" to agentId))
+            // Preserve tool state for async sub-agents (they keep running in background)
+            val preservedSubIds = agent.asyncSubagents.keys.toSet()
+            agent.activeSubagentToolIds.keys.retainAll(preservedSubIds)
+            agent.activeSubagentToolNames.keys.retainAll(preservedSubIds)
+
+            if (agent.asyncSubagents.isEmpty()) {
+                sendToWebview("agentToolsClear", mapOf("id" to agentId))
+            } else {
+                // Clear only the parent's own activity bubble, keep sub-agent characters alive
+                sendToWebview("agentToolsClearParentOnly", mapOf("id" to agentId))
+            }
         }
 
         agent.isWaiting = true
@@ -192,8 +229,8 @@ class TranscriptParser(
             return
         }
 
-        // Verify parent is an active Task tool
-        if (agent.activeToolNames[parentToolId] != "Task") return
+        // Verify parent is an active Task/Agent tool
+        if (agent.activeToolNames[parentToolId] !in SUBAGENT_TOOL_NAMES) return
 
         val msg = data["message"] as? Map<String, Any?> ?: return
         val msgType = msg["type"] as? String ?: return
@@ -261,6 +298,166 @@ class TranscriptParser(
             }
             if (stillHasNonExempt) {
                 timerManager.startPermissionTimer(agentId)
+            }
+        }
+    }
+
+    /**
+     * Register an async sub-agent whose work lives in `<projectDir>/<sessionId>/subagents/agent-<id>.jsonl`.
+     * Starts FileWatcher polling for that file (via callback) so we can stream its tool activity.
+     */
+    private fun registerAsyncSubagent(
+        agentId: Int,
+        agent: AgentState,
+        parentToolId: String,
+        subagentId: String,
+    ) {
+        if (agent.asyncSubagents.containsKey(parentToolId)) return
+
+        val sessionFile = File(agent.jsonlFile)
+        val sessionId = sessionFile.nameWithoutExtension
+        val subagentPath = File(
+            File(sessionFile.parentFile, sessionId),
+            "subagents/agent-$subagentId.jsonl"
+        ).absolutePath
+
+        agent.asyncSubagents[parentToolId] = AsyncSubagent(
+            parentToolId = parentToolId,
+            subagentId = subagentId,
+            jsonlFile = subagentPath,
+        )
+        onAsyncSubagentDetected?.invoke(agentId, parentToolId, subagentPath)
+    }
+
+    /** Clear async sub-agent tracking + tell webview to despawn. */
+    private fun clearAsyncSubagent(agentId: Int, agent: AgentState, parentToolId: String) {
+        val sub = agent.asyncSubagents.remove(parentToolId) ?: return
+        agent.activeSubagentToolIds.remove(parentToolId)
+        agent.activeSubagentToolNames.remove(parentToolId)
+        sendToWebview("subagentClear", mapOf(
+            "id" to agentId,
+            "parentToolId" to parentToolId,
+        ))
+        onAsyncSubagentFinished?.invoke(agentId, parentToolId)
+        // Silence unused warning on `sub` — referenced for future debugging
+        @Suppress("UNUSED_VARIABLE") val _unused = sub
+    }
+
+    /**
+     * Parse a single line from an async sub-agent's JSONL file.
+     * Emits `subagentToolStart` / `subagentToolDone` / `subagentClear` based on content.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun processSubagentLine(agentId: Int, parentToolId: String, line: String) {
+        val agent = agents[agentId] ?: return
+        val sub = agent.asyncSubagents[parentToolId] ?: return
+        try {
+            val record = gson.fromJson(line, Map::class.java) as Map<String, Any?>
+            val type = record["type"] as? String
+
+            when (type) {
+                "assistant" -> processSubagentAssistant(agentId, agent, parentToolId, record)
+                "user" -> processSubagentUser(agentId, agent, parentToolId, record)
+                else -> {
+                    // Top-level "type" may be absent on some records; check nested message shape
+                    val message = record["message"] as? Map<String, Any?>
+                    if (message != null) {
+                        val role = message["role"] as? String
+                        when (role) {
+                            "assistant" -> processSubagentAssistantMessage(agentId, agent, parentToolId, message)
+                            "user" -> {
+                                val content = message["content"]
+                                if (content is List<*>) {
+                                    processSubagentToolResults(agentId, agent, parentToolId, content as List<Map<String, Any?>>)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Ignore malformed lines
+        }
+        // Silence unused
+        @Suppress("UNUSED_VARIABLE") val _unused = sub
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun processSubagentAssistant(
+        agentId: Int, agent: AgentState, parentToolId: String, record: Map<String, Any?>
+    ) {
+        val message = record["message"] as? Map<String, Any?> ?: return
+        processSubagentAssistantMessage(agentId, agent, parentToolId, message)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun processSubagentAssistantMessage(
+        agentId: Int, agent: AgentState, parentToolId: String, message: Map<String, Any?>
+    ) {
+        val content = message["content"] as? List<Map<String, Any?>> ?: return
+        val stopReason = message["stop_reason"] as? String
+
+        var hasNonExemptSubTool = false
+        for (block in content) {
+            if (block["type"] == "tool_use" && block["id"] != null) {
+                val toolName = (block["name"] as? String) ?: ""
+                val input = (block["input"] as? Map<String, Any?>) ?: emptyMap()
+                val status = formatToolStatus(toolName, input)
+                val blockId = block["id"] as String
+
+                val subTools = agent.activeSubagentToolIds.getOrPut(parentToolId) { mutableSetOf() }
+                subTools.add(blockId)
+
+                val subNames = agent.activeSubagentToolNames.getOrPut(parentToolId) { mutableMapOf() }
+                subNames[blockId] = toolName
+
+                if (toolName !in TimerManager.PERMISSION_EXEMPT_TOOLS) {
+                    hasNonExemptSubTool = true
+                }
+
+                sendToWebview("subagentToolStart", mapOf(
+                    "id" to agentId,
+                    "parentToolId" to parentToolId,
+                    "toolId" to blockId,
+                    "status" to status,
+                ))
+            }
+        }
+        if (hasNonExemptSubTool) {
+            timerManager.startPermissionTimer(agentId)
+        }
+
+        // Sub-agent signaled end of its turn → it's done
+        if (stopReason == "end_turn") {
+            clearAsyncSubagent(agentId, agent, parentToolId)
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun processSubagentUser(
+        agentId: Int, agent: AgentState, parentToolId: String, record: Map<String, Any?>
+    ) {
+        val message = record["message"] as? Map<String, Any?> ?: return
+        val content = message["content"] as? List<Map<String, Any?>> ?: return
+        processSubagentToolResults(agentId, agent, parentToolId, content)
+    }
+
+    private fun processSubagentToolResults(
+        agentId: Int, agent: AgentState, parentToolId: String, content: List<Map<String, Any?>>
+    ) {
+        for (block in content) {
+            if (block["type"] == "tool_result" && block["tool_use_id"] != null) {
+                val toolUseId = block["tool_use_id"] as String
+                agent.activeSubagentToolIds[parentToolId]?.remove(toolUseId)
+                agent.activeSubagentToolNames[parentToolId]?.remove(toolUseId)
+
+                delayScheduler.schedule({
+                    sendToWebview("subagentToolDone", mapOf(
+                        "id" to agentId,
+                        "parentToolId" to parentToolId,
+                        "toolId" to toolUseId,
+                    ))
+                }, Constants.TOOL_DONE_DELAY_MS, TimeUnit.MILLISECONDS)
             }
         }
     }

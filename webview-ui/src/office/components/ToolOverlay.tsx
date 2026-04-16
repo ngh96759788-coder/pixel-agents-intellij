@@ -3,7 +3,7 @@ import type { ToolActivity } from '../types.js'
 import type { OfficeState } from '../engine/officeState.js'
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js'
 import { TILE_SIZE, CharacterState } from '../types.js'
-import { TOOL_OVERLAY_VERTICAL_OFFSET, CHARACTER_SITTING_OFFSET_PX } from '../../constants.js'
+import { TOOL_OVERLAY_VERTICAL_OFFSET, CHARACTER_SITTING_OFFSET_PX, SUBAGENT_DISPLAY_NAMES } from '../../constants.js'
 
 interface ToolOverlayProps {
   officeState: OfficeState
@@ -105,7 +105,12 @@ export function ToolOverlay({
             activityText = 'Needs approval'
           } else {
             const sub = subagentCharacters.find((s) => s.id === id)
-            activityText = sub ? sub.label : 'Subtask'
+            if (sub?.subagentType) {
+              const displayName = SUBAGENT_DISPLAY_NAMES[sub.subagentType]
+              activityText = displayName ? `${displayName}: ${sub.label}` : sub.label
+            } else {
+              activityText = sub ? sub.label : 'Subtask'
+            }
           }
         } else {
           activityText = getActivityText(id, agentTools, ch.isActive)

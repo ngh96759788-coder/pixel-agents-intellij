@@ -28,7 +28,7 @@ const menuItemBase: React.CSSProperties = {
 const THEMES = [
   { id: 'default', label: 'Office' },
   { id: 'alien', label: 'UFO' },
-  { id: 'zoo', label: 'Zoo' },
+  { id: 'cat', label: 'Cat Cafe' },
 ]
 
 export function SettingsModal({ isOpen, onClose, isDebugMode, onToggleDebugMode, currentTheme }: SettingsModalProps) {

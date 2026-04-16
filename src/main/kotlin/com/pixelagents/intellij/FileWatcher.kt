@@ -11,7 +11,7 @@ class FileWatcher(
     private val agents: ConcurrentHashMap<Int, AgentState>,
     private val knownJsonlFiles: ConcurrentHashMap.KeySetView<String, Boolean>,
     private val activeAgentIdRef: () -> Int?,
-    private val onNewAgentFile: ((String) -> Unit)?,
+    var onNewAgentFile: ((String) -> Unit)?,
     private val persistAgents: () -> Unit,
     timerManager: TimerManager,
 ) : Disposable {
@@ -25,7 +25,26 @@ class FileWatcher(
     private val jsonlPollTimers = ConcurrentHashMap<Int, ScheduledFuture<*>>()
     private var projectScanTimer: ScheduledFuture<*>? = null
 
-    val transcriptParser = TranscriptParser(sendToWebview, agents, timerManager)
+    /** Async sub-agent file watchers keyed by "agentId:parentToolId". */
+    private val subagentPollTimers = ConcurrentHashMap<String, ScheduledFuture<*>>()
+
+    /** Start time of each sub-agent watcher for detecting JSONL-never-appeared timeouts. */
+    private val subagentStartTimes = ConcurrentHashMap<String, Long>()
+
+    /** Last time each sub-agent watcher observed file growth (or saw the file exist). */
+    private val subagentLastActivity = ConcurrentHashMap<String, Long>()
+
+    /** Callback invoked when a sub-agent watcher gives up (timeout). Set by caller. */
+    var onSubagentTimeout: ((agentId: Int, parentToolId: String) -> Unit)? = null
+
+    val transcriptParser = TranscriptParser(sendToWebview, agents, timerManager).also { parser ->
+        parser.onAsyncSubagentDetected = { agentId, parentToolId, path ->
+            startSubagentWatching(agentId, parentToolId, path)
+        }
+        parser.onAsyncSubagentFinished = { agentId, parentToolId ->
+            stopSubagentWatching(agentId, parentToolId)
+        }
+    }
     val timerMgr = timerManager
 
     fun startFileWatching(agentId: Int, filePath: String) {
@@ -150,13 +169,21 @@ class FileWatcher(
 
         for (file in files) {
             if (knownJsonlFiles.add(file)) {
+                // Check if file is actively being written to (recent modification)
+                val jsonlFile = File(file)
+                val ageMs = System.currentTimeMillis() - jsonlFile.lastModified()
+                if (ageMs > Constants.ADOPTION_MAX_AGE_MS) continue
+
                 val activeId = activeAgentIdRef()
                 if (activeId != null) {
                     // Active agent focused → /clear reassignment
-                    println("[Pixel Agents] New JSONL detected: ${File(file).name}, reassigning to agent $activeId")
+                    println("[Pixel Agents] New JSONL detected: ${jsonlFile.name}, reassigning to agent $activeId")
                     reassignAgentToFile(activeId, file)
+                } else {
+                    // No active agent → adopt as new agent (terminal started without --session-id)
+                    println("[Pixel Agents] Adopting new JSONL: ${jsonlFile.name}")
+                    onNewAgentFile?.invoke(file)
                 }
-                // Terminal adoption for IntelliJ would go here
             }
         }
     }
@@ -179,6 +206,111 @@ class FileWatcher(
         pollingTimers.remove(agentId)?.cancel(false)
         timerMgr.cancelWaitingTimer(agentId)
         timerMgr.cancelPermissionTimer(agentId)
+
+        // Stop any async sub-agent watchers tied to this agent
+        val prefix = "$agentId:"
+        val keysToStop = subagentPollTimers.keys.filter { it.startsWith(prefix) }
+        for (key in keysToStop) {
+            subagentPollTimers.remove(key)?.cancel(false)
+        }
+    }
+
+    // ── Async sub-agent file watching ──────────────────────────────────
+
+    private fun subKey(agentId: Int, parentToolId: String): String = "$agentId:$parentToolId"
+
+    /**
+     * Start watching an async sub-agent's JSONL at `<sessionDir>/<sessionId>/subagents/agent-<id>.jsonl`.
+     * The file may not exist yet — poll until it does, then tail new lines.
+     */
+    fun startSubagentWatching(agentId: Int, parentToolId: String, filePath: String) {
+        val key = subKey(agentId, parentToolId)
+        if (subagentPollTimers.containsKey(key)) return
+
+        val now = System.currentTimeMillis()
+        subagentStartTimes[key] = now
+        subagentLastActivity[key] = now
+
+        val future = executor.scheduleAtFixedRate({
+            try {
+                readSubagentNewLines(agentId, parentToolId, filePath)
+                checkSubagentTimeout(agentId, parentToolId, filePath)
+            } catch (_: Exception) {
+            }
+        }, 0, Constants.FILE_WATCHER_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS)
+        subagentPollTimers[key] = future
+    }
+
+    fun stopSubagentWatching(agentId: Int, parentToolId: String) {
+        val key = subKey(agentId, parentToolId)
+        subagentPollTimers.remove(key)?.cancel(false)
+        subagentStartTimes.remove(key)
+        subagentLastActivity.remove(key)
+    }
+
+    /** Give up if the JSONL never appears, or if it hasn't grown in a long time. */
+    private fun checkSubagentTimeout(agentId: Int, parentToolId: String, filePath: String) {
+        val key = subKey(agentId, parentToolId)
+        val started = subagentStartTimes[key] ?: return
+        val lastActive = subagentLastActivity[key] ?: started
+        val now = System.currentTimeMillis()
+        val file = File(filePath)
+
+        val shouldGiveUp = if (!file.exists()) {
+            // File never created
+            now - started > Constants.SUBAGENT_JSONL_WAIT_TIMEOUT_MS
+        } else {
+            // File exists but is stale — no new writes for SUBAGENT_IDLE_TIMEOUT_MS
+            now - lastActive > Constants.SUBAGENT_IDLE_TIMEOUT_MS &&
+                now - file.lastModified() > Constants.SUBAGENT_IDLE_TIMEOUT_MS
+        }
+
+        if (shouldGiveUp) {
+            println("[Pixel Agents] Sub-agent watcher timeout $agentId/$parentToolId")
+            stopSubagentWatching(agentId, parentToolId)
+            onSubagentTimeout?.invoke(agentId, parentToolId)
+        }
+    }
+
+    private fun readSubagentNewLines(agentId: Int, parentToolId: String, filePath: String) {
+        val agent = agents[agentId] ?: run {
+            stopSubagentWatching(agentId, parentToolId)
+            return
+        }
+        val sub = agent.asyncSubagents[parentToolId] ?: run {
+            stopSubagentWatching(agentId, parentToolId)
+            return
+        }
+
+        val file = File(filePath)
+        if (!file.exists()) return
+        val size = file.length()
+        if (size <= sub.fileOffset) return
+
+        // Mark activity for timeout tracking
+        subagentLastActivity[subKey(agentId, parentToolId)] = System.currentTimeMillis()
+
+        try {
+            val bytesToRead = (size - sub.fileOffset).toInt()
+            val buf = ByteArray(bytesToRead)
+            RandomAccessFile(file, "r").use { raf ->
+                raf.seek(sub.fileOffset)
+                raf.readFully(buf)
+            }
+            sub.fileOffset = size
+
+            val text = sub.lineBuffer + String(buf, Charsets.UTF_8)
+            val lines = text.split("\n")
+            sub.lineBuffer = lines.last()
+            val completeLines = lines.dropLast(1)
+
+            for (line in completeLines) {
+                if (line.isBlank()) continue
+                transcriptParser.processSubagentLine(agentId, parentToolId, line)
+            }
+        } catch (e: Exception) {
+            println("[Pixel Agents] Subagent read error $agentId/$parentToolId: $e")
+        }
     }
 
     override fun dispose() {
@@ -186,6 +318,8 @@ class FileWatcher(
         for (id in agents.keys.toList()) {
             stopWatching(id)
         }
+        for (timer in subagentPollTimers.values) timer.cancel(false)
+        subagentPollTimers.clear()
         transcriptParser.dispose()
         executor.shutdownNow()
     }

@@ -10,6 +10,9 @@ import java.io.File
 import java.nio.file.Paths
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class AgentManager(
@@ -26,6 +29,10 @@ class AgentManager(
 ) : Disposable {
 
     private val gson = Gson()
+    private val sessionCheckExecutor = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "PixelAgents-SessionCheck").apply { isDaemon = true }
+    }
+    private var sessionCheckTimer: ScheduledFuture<*>? = null
 
     fun getProjectDirPath(cwd: String? = null): String? {
         val workspacePath = cwd ?: project.basePath ?: return null
@@ -74,6 +81,27 @@ class AgentManager(
         fileWatcher.startJsonlPoll(id, agent)
     }
 
+    /** Adopt an externally-started Claude session (no --session-id) as a new agent */
+    fun adoptAgent(jsonlFilePath: String) {
+        val id = nextAgentId.getAndIncrement()
+        val idx = nextTerminalIndex.getAndIncrement()
+        val terminalName = "${Constants.TERMINAL_NAME_PREFIX} #$idx"
+        val projectDir = getProjectDirPath() ?: return
+
+        val agent = AgentState(
+            id = id,
+            terminalName = terminalName,
+            projectDir = projectDir,
+            jsonlFile = jsonlFilePath,
+        )
+        agents[id] = agent
+        persistAgents()
+        sendToWebview("agentCreated", mapOf("id" to id))
+        fileWatcher.startFileWatching(id, jsonlFilePath)
+        fileWatcher.readNewLines(id)
+        println("[Pixel Agents] Adopted agent $id from ${java.io.File(jsonlFilePath).name}")
+    }
+
     fun focusAgent(agentId: Int) {
         agents[agentId] ?: return
         // Focus the terminal tool window
@@ -91,6 +119,19 @@ class AgentManager(
         sendToWebview("agentClosed", mapOf("id" to agentId))
     }
 
+    /** Called by FileWatcher when an async sub-agent's JSONL polling times out. */
+    fun clearOrphanedSubagent(agentId: Int, parentToolId: String) {
+        val agent = agents[agentId] ?: return
+        agent.asyncSubagents.remove(parentToolId) ?: return
+        agent.activeSubagentToolIds.remove(parentToolId)
+        agent.activeSubagentToolNames.remove(parentToolId)
+        persistAgents()
+        sendToWebview("subagentClear", mapOf(
+            "id" to agentId,
+            "parentToolId" to parentToolId,
+        ))
+    }
+
     fun removeAgent(agentId: Int) {
         fileWatcher.stopWatching(agentId)
         agents.remove(agentId)
@@ -104,6 +145,13 @@ class AgentManager(
                 terminalName = agent.terminalName,
                 jsonlFile = agent.jsonlFile,
                 projectDir = agent.projectDir,
+                asyncSubagents = agent.asyncSubagents.values.map {
+                    PersistedAsyncSubagent(
+                        parentToolId = it.parentToolId,
+                        subagentId = it.subagentId,
+                        jsonlFile = it.jsonlFile,
+                    )
+                },
             )
         }
         settings.persistedAgents = gson.toJson(persisted)
@@ -141,6 +189,20 @@ class AgentManager(
                 fileWatcher.startFileWatching(p.id, p.jsonlFile)
             } else {
                 fileWatcher.startJsonlPoll(p.id, agent)
+            }
+
+            // Rehydrate async sub-agents and resume file watchers. Skip to EOF on existing
+            // files so we don't replay finished history; poll until created otherwise.
+            for (ps in p.asyncSubagents) {
+                val subFile = File(ps.jsonlFile)
+                val sub = AsyncSubagent(
+                    parentToolId = ps.parentToolId,
+                    subagentId = ps.subagentId,
+                    jsonlFile = ps.jsonlFile,
+                    fileOffset = if (subFile.exists()) subFile.length() else 0L,
+                )
+                agent.asyncSubagents[ps.parentToolId] = sub
+                fileWatcher.startSubagentWatching(p.id, ps.parentToolId, ps.jsonlFile)
             }
 
             agents[p.id] = agent
@@ -199,6 +261,90 @@ class AgentManager(
         }
     }
 
+    /** Remove agent when its terminal is closed/terminated */
+    fun onTerminalClosed(terminalName: String) {
+        val agent = agents.values.find { it.terminalName == terminalName } ?: return
+        println("[Pixel Agents] Terminal closed, removing agent ${agent.id}: $terminalName")
+        closeAgent(agent.id)
+    }
+
+    /** Check if a terminal name belongs to an existing agent */
+    fun isTerminalKnown(terminalName: String): Boolean {
+        return agents.values.any { it.terminalName == terminalName }
+    }
+
+    // ── Session alive detection ──────────────────────────────────────
+
+    /** Start periodic check for dead Claude sessions */
+    fun startSessionAliveCheck() {
+        sessionCheckTimer = sessionCheckExecutor.scheduleAtFixedRate({
+            try {
+                checkDeadSessions()
+            } catch (e: Exception) {
+                println("[Pixel Agents] Session check error: $e")
+            }
+        }, Constants.SESSION_CHECK_INTERVAL_MS, Constants.SESSION_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS)
+    }
+
+    private fun checkDeadSessions() {
+        if (agents.isEmpty()) return
+
+        val now = System.currentTimeMillis()
+        val candidates = mutableListOf<Int>()
+
+        for ((id, agent) in agents) {
+            // Skip agents with active tools (clearly alive)
+            if (agent.activeToolIds.isNotEmpty()) continue
+            // Skip agents with active sub-agent tools
+            if (agent.activeSubagentToolIds.isNotEmpty()) continue
+            // Skip agents with async sub-agents still running in background
+            if (agent.asyncSubagents.isNotEmpty()) continue
+            // Skip agents in waiting/permission state
+            if (agent.isWaiting || agent.permissionSent) continue
+
+            val file = File(agent.jsonlFile)
+            if (!file.exists()) continue
+
+            val staleDuration = now - file.lastModified()
+            if (staleDuration < Constants.SESSION_STALE_THRESHOLD_MS) continue
+
+            candidates.add(id)
+        }
+
+        if (candidates.isEmpty()) return
+
+        // Only remove agents if NO Claude process is running on the system.
+        // This avoids false removal when:
+        //   - Adopted agents don't have --session-id in their command line
+        //   - Claude is waiting idle at the prompt for user input
+        //   - Sub-agent work happens in separate files not tracked by main JSONL
+        if (isAnyClaudeRunning()) return
+
+        for (id in candidates) {
+            println("[Pixel Agents] No claude processes running, removing idle agent $id")
+            closeAgent(id)
+        }
+    }
+
+    /** Check if any Claude CLI process is currently running on the system */
+    private fun isAnyClaudeRunning(): Boolean {
+        return try {
+            // Match the claude executable in any process's command line
+            val proc = ProcessBuilder("pgrep", "-f", "[c]laude")
+                .redirectErrorStream(true)
+                .start()
+            proc.inputStream.readBytes()
+            val finished = proc.waitFor(5, TimeUnit.SECONDS)
+            if (!finished) {
+                proc.destroyForcibly()
+                return true // Timeout → assume alive (safe default)
+            }
+            proc.exitValue() == 0
+        } catch (_: Exception) {
+            true // Can't check → assume alive
+        }
+    }
+
     fun openSessionsFolder() {
         val projectDir = getProjectDirPath()
         if (projectDir != null && File(projectDir).exists()) {
@@ -207,6 +353,7 @@ class AgentManager(
     }
 
     override fun dispose() {
-        // Cleanup handled by panel
+        sessionCheckTimer?.cancel(false)
+        sessionCheckExecutor.shutdownNow()
     }
 }

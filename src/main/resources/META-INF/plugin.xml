@@ -1,11 +1,67 @@
 <idea-plugin>
     <id>com.pixelagents.intellij</id>
     <name>Pixel Agents</name>
-    <vendor url="https://github.com/pablodelucca/pixel-agents">pixelagents</vendor>
+    <vendor email="hoon@aladin.co.kr"
+            url="https://github.com/ngh96759788-coder/pixel-agents-intellij">Namkung Hoon</vendor>
+
     <description><![CDATA[
-        Pixel art office where your Claude Code terminal sessions are animated characters.
-        Watch your AI agents come to life as they work on your code.
+<h2>Pixel Agents for IntelliJ</h2>
+<p>
+  Turn your Claude Code terminal sessions into animated pixel art characters in a virtual office.
+  Each terminal you open spawns a character that walks around, sits at desks, and visually reflects
+  what the agent is doing in real time.
+</p>
+
+<h3>Features</h3>
+<ul>
+  <li><b>One agent, one character</b> &mdash; every Claude Code terminal gets its own animated character</li>
+  <li><b>Live activity tracking</b> &mdash; characters animate based on what the agent is doing (writing, reading, running commands)</li>
+  <li><b>Sub-agent visualization</b> &mdash; Task/Agent sub-agents spawn as separate characters, including async background agents</li>
+  <li><b>Office layout editor</b> &mdash; design your office with floors, walls, and 80+ furniture items</li>
+  <li><b>Multiple themes</b> &mdash; default office, alien, cat, and zoo themes with unique characters and furniture</li>
+  <li><b>Speech bubbles</b> &mdash; visual indicators when an agent is waiting or needs permission</li>
+  <li><b>Sound notifications</b> &mdash; optional chime when an agent finishes its turn</li>
+  <li><b>Persistent layouts</b> &mdash; office design saved across IDE restarts</li>
+  <li><b>Animated furniture</b> &mdash; wall clocks tick, desk fans spin, water coolers bubble</li>
+</ul>
+
+<h3>How It Works</h3>
+<p>
+  Pixel Agents watches Claude Code's JSONL transcript files to track what each agent is doing.
+  No modifications to Claude Code are needed &mdash; it's purely observational.
+  The webview runs a lightweight game loop with canvas rendering, BFS pathfinding,
+  and a character state machine.
+</p>
+
+<h3>Getting Started</h3>
+<ol>
+  <li>Install <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code CLI</a></li>
+  <li>Open the <b>Pixel Agents</b> tool window (bottom panel)</li>
+  <li>Click <b>+ Agent</b> to spawn a Claude Code terminal</li>
+  <li>Watch the character react as Claude works on your code</li>
+</ol>
+
+<p>
+  Based on <a href="https://github.com/pablodelucca/pixel-agents">Pixel Agents for VS Code</a>
+  by Pablo De Lucca. Ported to the IntelliJ Platform with additional features.
+</p>
     ]]></description>
+
+    <change-notes><![CDATA[
+<h3>1.0.0</h3>
+<ul>
+  <li>Initial release &mdash; IntelliJ Platform port of Pixel Agents</li>
+  <li>JCEF-based webview with full canvas rendering</li>
+  <li>Claude Code JSONL transcript watching with hybrid polling</li>
+  <li>Async sub-agent file tracking (separate JSONL files)</li>
+  <li>Multiple themes: default, alien, cat, zoo</li>
+  <li>Layout editor with undo/redo, floor/wall painting, furniture placement</li>
+  <li>Auto-animated furniture (clocks, fans, water coolers)</li>
+  <li>Agent persistence across IDE restarts</li>
+  <li>External session adoption (terminals started without --session-id)</li>
+  <li>Dead session detection and cleanup</li>
+</ul>
+    ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.terminal</depends>

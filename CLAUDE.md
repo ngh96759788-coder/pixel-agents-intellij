@@ -211,3 +211,19 @@ All magic numbers and strings are centralized — never add inline constants to 
 - `WebviewViewProvider` (not `WebviewPanel`) — lives in panel area alongside terminal
 - Inline esbuild problem matcher (no extra extension needed)
 - Webview is separate Vite project with own `node_modules`/`tsconfig`
+
+## Behavioral Rules (MUST FOLLOW)
+
+1. **Never ask for confirmation** — When the user asks to do something, execute immediately. Do not ask "할까요?", "적용해볼까요?", "진행할까요?" etc. Just do it. Tool approval prompts are auto-approved; treat everything as pre-authorized.
+
+2. **Redrawing = preserve original form** — When improving pixel art sprites, ALWAYS keep the original character shape, proportions, and identity intact. Only improve: outline consistency, color contrast, noise cleanup, detail sharpness. NEVER redesign or change the silhouette.
+
+3. **Build pipeline** — `npm run build` in `webview-ui/` MUST run before `./gradlew buildPlugin`. Gradle alone does NOT rebuild webview assets. After changing sprites/layouts, also delete cached layouts: `rm -f ~/.pixel-agents/layout-*.json`.
+
+4. **Zoo theme animation assignment** — Characters 0,2,4 (lion, penguin, deer) = laptop typing animation. Characters 1,3,5 (bear, fox, rabbit) = grass eating animation. Laptop DOWN direction shows LID (dark back), NOT screen. Laptop UP direction shows thin screen edge near shoulders, NOT near crotch/feet.
+
+5. **Sub-agents get diverse palettes** — Sub-agents (from Task tool) should use `pickDiversePalette()`, not copy parent's palette. Each sub-agent should look visually distinct.
+
+6. **Do not repeat explanations** — If something was discussed before, just do it. Do not re-explain the same concepts.
+
+7. **Complete the full pipeline before reporting** — Do not show intermediate results or say "done" after partial steps. Complete the entire chain (sprite generation → animation overlay → cleanup → webview build → verification) before reporting to the user. One result, not five partial updates.

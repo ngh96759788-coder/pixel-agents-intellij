@@ -16,6 +16,7 @@ export interface SubagentCharacter {
   parentAgentId: number
   parentToolId: string
   label: string
+  subagentType?: string
 }
 
 export interface FurnitureAsset {
@@ -175,12 +176,21 @@ export function useExtensionMessages(
         os.setAgentActive(id, true)
         os.clearPermissionBubble(id)
         // Create sub-agent character for Task tool subtasks
-        if (status.startsWith('Subtask:')) {
-          const label = status.slice('Subtask:'.length).trim()
+        if (status.startsWith('Subtask')) {
+          // Parse "Subtask[type]: desc" or "Subtask: desc"
+          let subagentType: string | undefined
+          let label: string
+          const bracketMatch = status.match(/^Subtask\[(\w+)\]:\s*(.*)$/)
+          if (bracketMatch) {
+            subagentType = bracketMatch[1]
+            label = bracketMatch[2]
+          } else {
+            label = status.slice('Subtask:'.length).trim()
+          }
           const subId = os.addSubagent(id, toolId)
           setSubagentCharacters((prev) => {
             if (prev.some((s) => s.id === subId)) return prev
-            return [...prev, { id: subId, parentAgentId: id, parentToolId: toolId, label }]
+            return [...prev, { id: subId, parentAgentId: id, parentToolId: toolId, label, subagentType }]
           })
           playSpawnSound()
         }
@@ -190,10 +200,12 @@ export function useExtensionMessages(
         setAgentTools((prev) => {
           const list = prev[id]
           if (!list) return prev
-          return {
-            ...prev,
-            [id]: list.map((t) => (t.toolId === toolId ? { ...t, done: true } : t)),
+          const updated = list.map((t) => (t.toolId === toolId ? { ...t, done: true } : t))
+          // If all tools are done, clear the character's tool state
+          if (updated.every((t) => t.done)) {
+            os.setAgentTool(id, null)
           }
+          return { ...prev, [id]: updated }
         })
       } else if (msg.type === 'agentToolsClear') {
         const id = msg.id as number
@@ -214,6 +226,18 @@ export function useExtensionMessages(
         setSubagentCharacters((prev) => prev.filter((s) => s.parentAgentId !== id))
         os.setAgentTool(id, null)
         os.clearPermissionBubble(id)
+      } else if (msg.type === 'agentToolsClearParentOnly') {
+        // Parent's turn ended but async sub-agents are still running in background.
+        // Clear the parent's own tool bubble but keep sub-agent characters alive.
+        const id = msg.id as number
+        setAgentTools((prev) => {
+          if (!(id in prev)) return prev
+          const next = { ...prev }
+          delete next[id]
+          return next
+        })
+        os.setAgentTool(id, null)
+        os.clearPermissionBubble(id)
       } else if (msg.type === 'agentSelected') {
         const id = msg.id as number
         setSelectedAgent(id)
@@ -231,6 +255,7 @@ export function useExtensionMessages(
         })
         os.setAgentActive(id, status === 'active')
         if (status === 'waiting') {
+          os.setAgentTool(id, null)
           os.showWaitingBubble(id)
           playDoneSound()
         }
@@ -319,10 +344,8 @@ export function useExtensionMessages(
           }
           return { ...prev, [id]: next }
         })
-        // Remove sub-agent character
-        os.removeSubagent(id, parentToolId)
-        setSubagentCharacters((prev) => prev.filter((s) => !(s.parentAgentId === id && s.parentToolId === parentToolId)))
-        playDespawnSound()
+        // Mark sub-agent as completed — it will wander and auto-despawn after 60s
+        os.markSubagentCompleted(id, parentToolId)
       } else if (msg.type === 'characterSpritesLoaded') {
         const characters = msg.characters as Array<{ down: string[][][]; up: string[][][]; right: string[][][] }>
         console.log(`[Webview] Received ${characters.length} pre-colored character sprites`)

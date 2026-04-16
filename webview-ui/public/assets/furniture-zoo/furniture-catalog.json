@@ -184,8 +184,7 @@
     {
       "id": "ZOO_BENCH_WIDE",
       "label": "Long Bench",
-      "category": "desks",
-      "isDesk": true,
+      "category": "chairs",
       "file": "furniture-zoo/ZOO-BENCH-WIDE.png",
       "width": 32,
       "height": 32,

@@ -8,6 +8,15 @@ object Constants {
     const val TOOL_DONE_DELAY_MS = 300L
     const val PERMISSION_TIMER_DELAY_MS = 7000L
     const val TEXT_IDLE_DELAY_MS = 5000L
+    const val ADOPTION_MAX_AGE_MS = 10000L  // Only adopt JSONL files modified within last 10s
+
+    // Session alive check
+    const val SESSION_CHECK_INTERVAL_MS = 30_000L  // Check every 30s
+    const val SESSION_STALE_THRESHOLD_MS = 60_000L // JSONL idle for 60s before checking process
+
+    // Async sub-agent watcher timeouts
+    const val SUBAGENT_JSONL_WAIT_TIMEOUT_MS = 30_000L   // Give up if file never appears
+    const val SUBAGENT_IDLE_TIMEOUT_MS = 120_000L        // Stop polling if no new data for 2m
 
     // Display truncation
     const val BASH_COMMAND_DISPLAY_MAX_LENGTH = 30
@@ -22,7 +31,7 @@ object Constants {
     const val FLOOR_PATTERN_COUNT = 7
     const val FLOOR_TILE_SIZE = 16
     val CHARACTER_DIRECTIONS = listOf("down", "up", "right")
-    const val CHAR_FRAME_W = 16
+    const val CHAR_FRAME_W = 24
     const val CHAR_FRAME_H = 32
     const val CHAR_FRAMES_PER_ROW = 7
     const val CHAR_COUNT = 6
@@ -37,35 +46,35 @@ object Constants {
 
     // Themes
     const val THEME_DEFAULT = "default"
-    val VALID_THEMES = listOf("default", "alien", "zoo")
+    val VALID_THEMES = listOf("default", "alien", "cat")
     val THEME_CHAR_DIRS = mapOf(
         "default" to "characters",
         "alien" to "characters-alien",
-        "zoo" to "characters-zoo",
+        "cat" to "characters-cat",
     )
     val THEME_FLOOR_FILES = mapOf(
         "default" to "floors.png",
         "alien" to "floors-alien.png",
-        "zoo" to "floors-zoo.png",
+        "cat" to "floors-cat.png",
     )
     val THEME_WALL_FILES = mapOf(
         "default" to "walls.png",
         "alien" to "walls-alien.png",
-        "zoo" to "walls-zoo.png",
+        "cat" to "walls-cat.png",
     )
     val THEME_FURNITURE_DIRS = mapOf(
         "default" to "furniture",
         "alien" to "furniture-alien",
-        "zoo" to "furniture-zoo",
+        "cat" to "furniture-cat",
     )
     val THEME_DEFAULT_LAYOUTS = mapOf(
         "default" to "default-layout.json",
         "alien" to "default-layout-alien.json",
-        "zoo" to "default-layout-zoo.json",
+        "cat" to "default-layout-cat.json",
     )
     val THEME_LAYOUT_FILES = mapOf(
         "default" to "layout-default.json",
         "alien" to "layout-alien.json",
-        "zoo" to "layout-zoo.json",
+        "cat" to "layout-cat.json",
     )
 }

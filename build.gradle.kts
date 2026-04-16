@@ -38,6 +38,18 @@ intellijPlatform {
             untilBuild = providers.gradleProperty("untilBuild")
         }
     }
+
+    publishing {
+        token = providers.environmentVariable("PUBLISH_TOKEN")
+    }
+
+    signing {
+        certificateChainFile = providers.environmentVariable("SIGNING_CERTIFICATE_CHAIN")
+            .map { file(it) }
+        privateKeyFile = providers.environmentVariable("SIGNING_PRIVATE_KEY")
+            .map { file(it) }
+        password = providers.environmentVariable("SIGNING_PASSWORD")
+    }
 }
 
 // Copy webview build output into plugin resources

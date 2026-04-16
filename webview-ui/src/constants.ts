@@ -15,9 +15,37 @@ export const WANDER_PAUSE_MIN_SEC = 1.0
 export const WANDER_PAUSE_MAX_SEC = 5.0
 export const WANDER_MOVES_BEFORE_REST_MIN = 3
 export const WANDER_MOVES_BEFORE_REST_MAX = 6
-export const SEAT_REST_MIN_SEC = 35.0
-export const SEAT_REST_MAX_SEC = 45.0
+export const SEAT_REST_MIN_SEC = 5.0
+export const SEAT_REST_MAX_SEC = 10.0
 export const IDLE_DESPAWN_SEC = 60.0
+export const MAX_VISIBLE_CHARACTERS = 6
+export const SUBAGENT_DESPAWN_DELAY_SEC = 60.0
+
+// ── Sub-agent Type → Fixed Palette Mapping ──────────────────
+// Maps subagent_type to a fixed palette index (0–5) so orchestration
+// agents always get the same character skin.
+export const SUBAGENT_PALETTE_MAP: Record<string, number> = {
+  architect: 0,
+  scout: 0,
+  kraken: 1,
+  spark: 1,
+  arbiter: 2,
+  critic: 3,
+  judge: 3,
+  scribe: 4,
+}
+
+// Maps subagent_type to display name for the character label
+export const SUBAGENT_DISPLAY_NAMES: Record<string, string> = {
+  architect: 'Archie',
+  scout: 'Archie',
+  kraken: 'Kit',
+  spark: 'Kit',
+  arbiter: 'Tori',
+  critic: 'Rex',
+  judge: 'Rex',
+  scribe: 'Luna',
+}
 
 // ── Matrix Effect ────────────────────────────────────────────
 export const MATRIX_EFFECT_DURATION_SEC = 0.3

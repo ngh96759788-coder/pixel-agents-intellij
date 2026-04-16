@@ -193,6 +193,8 @@ export interface Character {
   seatTimer: number
   /** Whether this character represents a sub-agent (spawned by Task tool) */
   isSubagent: boolean
+  /** Whether this sub-agent has completed its work (Task tool returned result) */
+  isCompleted: boolean
   /** Parent agent ID if this is a sub-agent, null otherwise */
   parentAgentId: number | null
   /** Cumulative idle time in seconds — triggers despawn when exceeding threshold */

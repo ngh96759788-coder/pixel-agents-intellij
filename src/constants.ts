@@ -36,50 +36,50 @@ export const GLOBAL_KEY_THEME = 'pixel-agents.theme';
 // ── Theme Definitions ──────────────────────────────────────
 export const THEME_DEFAULT = 'default';
 export const THEME_ALIEN = 'alien';
-export const THEME_ZOO = 'zoo';
-export const VALID_THEMES = [THEME_DEFAULT, THEME_ALIEN, THEME_ZOO] as const;
+export const THEME_CAT = 'cat';
+export const VALID_THEMES = [THEME_DEFAULT, THEME_ALIEN, THEME_CAT] as const;
 export type ThemeId = typeof VALID_THEMES[number];
 
 /** Maps theme ID to the characters subdirectory name */
 export const THEME_CHAR_DIRS: Record<string, string> = {
   [THEME_DEFAULT]: 'characters',
   [THEME_ALIEN]: 'characters-alien',
-  [THEME_ZOO]: 'characters-zoo',
+  [THEME_CAT]: 'characters-cat',
 };
 
 /** Maps theme ID to floors PNG filename */
 export const THEME_FLOOR_FILES: Record<string, string> = {
   [THEME_DEFAULT]: 'floors.png',
   [THEME_ALIEN]: 'floors-alien.png',
-  [THEME_ZOO]: 'floors-zoo.png',
+  [THEME_CAT]: 'floors-cat.png',
 };
 
 /** Maps theme ID to walls PNG filename */
 export const THEME_WALL_FILES: Record<string, string> = {
   [THEME_DEFAULT]: 'walls.png',
   [THEME_ALIEN]: 'walls-alien.png',
-  [THEME_ZOO]: 'walls-zoo.png',
+  [THEME_CAT]: 'walls-cat.png',
 };
 
 /** Maps theme ID to furniture subdirectory */
 export const THEME_FURNITURE_DIRS: Record<string, string> = {
   [THEME_DEFAULT]: 'furniture',
   [THEME_ALIEN]: 'furniture-alien',
-  [THEME_ZOO]: 'furniture',
+  [THEME_CAT]: 'furniture-cat',
 };
 
 /** Maps theme ID to bundled default layout filename */
 export const THEME_DEFAULT_LAYOUTS: Record<string, string> = {
   [THEME_DEFAULT]: 'default-layout.json',
   [THEME_ALIEN]: 'default-layout-alien.json',
-  [THEME_ZOO]: 'default-layout.json',
+  [THEME_CAT]: 'default-layout-cat.json',
 };
 
 /** Maps theme ID to user-level layout filename in ~/.pixel-agents/ */
 export const THEME_LAYOUT_FILES: Record<string, string> = {
   [THEME_DEFAULT]: 'layout.json',
   [THEME_ALIEN]: 'layout-alien.json',
-  [THEME_ZOO]: 'layout-zoo.json',
+  [THEME_CAT]: 'layout-cat.json',
 };
 
 // ── VS Code Identifiers ─────────────────────────────────────

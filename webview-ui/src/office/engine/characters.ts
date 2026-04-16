@@ -12,7 +12,7 @@ import {
   WANDER_MOVES_BEFORE_REST_MAX,
   SEAT_REST_MIN_SEC,
   SEAT_REST_MAX_SEC,
-  IDLE_DESPAWN_SEC,
+  SUBAGENT_DESPAWN_DELAY_SEC,
 } from '../../constants.js'
 
 /** Tools that show reading animation instead of typing */
@@ -76,6 +76,7 @@ export function createCharacter(
     seatTimer: 0,
     idleTimer: 0,
     isSubagent: false,
+    isCompleted: false,
     parentAgentId: null,
     matrixEffect: null,
     matrixEffectTimer: 0,
@@ -94,12 +95,12 @@ export function updateCharacter(
 ): 'despawn' | void {
   ch.frameTimer += dt
 
-  // Track idle time — reset when active, accumulate when idle
+  // Track idle time — only completed sub-agents despawn after timeout
   if (ch.isActive) {
     ch.idleTimer = 0
-  } else if (!ch.isSubagent && ch.matrixEffect === null) {
+  } else if (ch.isSubagent && ch.isCompleted && ch.matrixEffect === null) {
     ch.idleTimer += dt
-    if (ch.idleTimer >= IDLE_DESPAWN_SEC) {
+    if (ch.idleTimer >= SUBAGENT_DESPAWN_DELAY_SEC) {
       return 'despawn'
     }
   }
@@ -219,6 +220,26 @@ export function updateCharacter(
             ch.frame = 0
             ch.frameTimer = 0
             ch.wanderCount++
+          } else {
+            // Fallback: if no path found (enclosed area), try direct neighbors
+            const neighbors = [
+              { col: ch.tileCol + 1, row: ch.tileRow },
+              { col: ch.tileCol - 1, row: ch.tileRow },
+              { col: ch.tileCol, row: ch.tileRow + 1 },
+              { col: ch.tileCol, row: ch.tileRow - 1 },
+            ]
+            for (const n of neighbors) {
+              const key = `${n.col},${n.row}`
+              if (tileMap[n.row]?.[n.col] && !blockedTiles.has(key)) {
+                ch.path = [n]
+                ch.moveProgress = 0
+                ch.state = CharacterState.WALK
+                ch.frame = 0
+                ch.frameTimer = 0
+                ch.wanderCount++
+                break
+              }
+            }
           }
         }
         ch.wanderTimer = randomRange(WANDER_PAUSE_MIN_SEC, WANDER_PAUSE_MAX_SEC)

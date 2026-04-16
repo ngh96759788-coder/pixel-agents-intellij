@@ -66,6 +66,7 @@ class PixelAgentsPanel(
     private val fileWatcher: FileWatcher
     private val assetLoader = AssetLoader()
     private val layoutPersistence = LayoutPersistence()
+    private lateinit var terminalDetector: TerminalDetector
     private val settings = PixelAgentsSettings.getInstance()
     private val gson = Gson()
 
@@ -116,6 +117,15 @@ class PixelAgentsPanel(
             fileWatcher = fileWatcher,
             settings = settings,
         )
+
+        // Wire up terminal adoption callback now that agentManager is initialized
+        fileWatcher.onNewAgentFile = { jsonlFilePath ->
+            agentManager.adoptAgent(jsonlFilePath)
+        }
+        // Clean up orphaned async sub-agents when their file watcher times out
+        fileWatcher.onSubagentTimeout = { agentId, parentToolId ->
+            agentManager.clearOrphanedSubagent(agentId, parentToolId)
+        }
 
         // Extract webview resources from JAR to temp directory and load
         webviewDir = extractWebviewResources()
@@ -360,6 +370,16 @@ class PixelAgentsPanel(
         layoutPersistence.startWatching { layout ->
             bridge.sendToWebview("layoutLoaded", mapOf("layout" to layout))
         }
+
+        // 7. Start terminal detector (detect closed terminals only — no auto-creation)
+        terminalDetector = TerminalDetector(
+            project = project,
+            onTerminalClosed = { name -> agentManager.onTerminalClosed(name) },
+        )
+        terminalDetector.startScanning()
+
+        // 8. Start session alive check (removes agents when Claude process exits)
+        agentManager.startSessionAliveCheck()
     }
 
     private fun loadAndSendAssets() {
@@ -453,6 +473,7 @@ class PixelAgentsPanel(
     }
 
     override fun dispose() {
+        if (::terminalDetector.isInitialized) terminalDetector.dispose()
         layoutPersistence.dispose()
         fileWatcher.dispose()
         agentManager.dispose()

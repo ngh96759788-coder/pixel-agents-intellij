@@ -14,6 +14,7 @@ import {
   CHARACTER_SITTING_OFFSET_PX,
   CHARACTER_HIT_HALF_WIDTH,
   CHARACTER_HIT_HEIGHT,
+  MAX_VISIBLE_CHARACTERS,
 } from '../../constants.js'
 import type { Character, Seat, FurnitureInstance, TileType as TileTypeVal, OfficeLayout, PlacedFurniture } from '../types.js'
 import { createCharacter, updateCharacter } from './characters.js'
@@ -182,11 +183,10 @@ export class OfficeState {
    * repeat in balanced rounds with a random hue shift (≥45°).
    */
   private pickDiversePalette(): { palette: number; hueShift: number } {
-    // Count how many non-sub-agents use each base palette
+    // Count how many characters use each base palette
     const paletteCount = getLoadedPaletteCount()
     const counts = new Array(paletteCount).fill(0) as number[]
     for (const ch of this.characters.values()) {
-      if (ch.isSubagent) continue
       counts[ch.palette % paletteCount]++
     }
     const minCount = Math.min(...counts)
@@ -206,6 +206,7 @@ export class OfficeState {
 
   addAgent(id: number, preferredPalette?: number, preferredHueShift?: number, preferredSeatId?: string, skipSpawnEffect?: boolean): void {
     if (this.characters.has(id)) return
+    if (this.characters.size >= MAX_VISIBLE_CHARACTERS) return
 
     let palette: number
     let hueShift: number
@@ -365,15 +366,19 @@ export class OfficeState {
     return true
   }
 
-  /** Create a sub-agent character with the parent's palette. Returns the sub-agent ID. */
+  /** Create a sub-agent character with a diverse palette. Returns the sub-agent ID. */
   addSubagent(parentAgentId: number, parentToolId: string): number {
     const key = `${parentAgentId}:${parentToolId}`
     if (this.subagentIdMap.has(key)) return this.subagentIdMap.get(key)!
+    if (this.characters.size >= MAX_VISIBLE_CHARACTERS) return 0 // at capacity
 
     const id = this.nextSubagentId--
     const parentCh = this.characters.get(parentAgentId)
-    const palette = parentCh ? parentCh.palette : 0
-    const hueShift = parentCh ? parentCh.hueShift : 0
+
+    // Always pick diverse palette so each sub-agent looks distinct
+    const diverse = this.pickDiversePalette()
+    const palette = diverse.palette
+    const hueShift = diverse.hueShift
 
     // Find the free seat closest to the parent agent
     const parentCol = parentCh ? parentCh.tileCol : 0
@@ -399,9 +404,28 @@ export class OfficeState {
       seat.assigned = true
       ch = createCharacter(id, palette, bestSeatId, seat, hueShift)
     } else {
-      // No seats — spawn at closest walkable tile to parent
+      // No seats — spawn at closest UNOCCUPIED walkable tile to parent.
+      // Skip tiles currently occupied by any other character so sub-agents
+      // don't materialize on top of existing characters / each other.
+      const occupied = new Set<string>()
+      for (const other of this.characters.values()) {
+        if (other.matrixEffect === 'despawn') continue
+        occupied.add(`${other.tileCol},${other.tileRow}`)
+      }
+
       let spawn = { col: 1, row: 1 }
-      if (this.walkableTiles.length > 0) {
+      let bestTileDist = Infinity
+      for (const tile of this.walkableTiles) {
+        if (occupied.has(`${tile.col},${tile.row}`)) continue
+        const d = dist(tile.col, tile.row)
+        if (d < bestTileDist) {
+          bestTileDist = d
+          spawn = tile
+        }
+      }
+      // If every walkable tile is occupied, fall back to closest walkable
+      // without the occupancy filter so we still spawn somewhere.
+      if (bestTileDist === Infinity && this.walkableTiles.length > 0) {
         let closest = this.walkableTiles[0]
         let closestDist = dist(closest.col, closest.row)
         for (let i = 1; i < this.walkableTiles.length; i++) {
@@ -495,6 +519,22 @@ export class OfficeState {
     for (const key of toRemove) {
       this.subagentIdMap.delete(key)
     }
+  }
+
+  /** Mark a sub-agent as completed — it will wander and auto-despawn after SUBAGENT_DESPAWN_DELAY_SEC */
+  markSubagentCompleted(parentAgentId: number, parentToolId: string): void {
+    const key = `${parentAgentId}:${parentToolId}`
+    const id = this.subagentIdMap.get(key)
+    if (id === undefined) return
+    const ch = this.characters.get(id)
+    if (!ch) return
+    ch.isCompleted = true
+    ch.isActive = false
+    ch.idleTimer = 0 // Start counting from completion
+    ch.currentTool = null
+    // Clean up tracking maps so the key can be reused
+    this.subagentIdMap.delete(key)
+    this.subagentMeta.delete(id)
   }
 
   /** Look up the sub-agent character ID for a given parent+toolId, or null */
@@ -678,6 +718,13 @@ export class OfficeState {
     // Remove characters that finished despawn
     for (const id of toDelete) {
       this.characters.delete(id)
+      // Clean up sub-agent maps if this was a sub-agent
+      const meta = this.subagentMeta.get(id)
+      if (meta) {
+        const key = `${meta.parentAgentId}:${meta.parentToolId}`
+        this.subagentIdMap.delete(key)
+        this.subagentMeta.delete(id)
+      }
     }
 
     // Auto-animate furniture (per-item timers)

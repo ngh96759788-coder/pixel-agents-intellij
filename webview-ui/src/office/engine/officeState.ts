@@ -124,23 +124,44 @@ export class OfficeState {
       }
     }
 
-    // Relocate any characters that ended up outside bounds or on non-walkable tiles
+    // Relocate any characters that ended up outside bounds, on non-walkable tiles,
+    // or too close to walls (can happen on theme switch)
     for (const ch of this.characters.values()) {
-      if (ch.seatId) continue // seated characters are fine
       const outOfBounds = ch.tileCol < 0 || ch.tileCol >= layout.cols || ch.tileRow < 0 || ch.tileRow >= layout.rows
       const onNonWalkable = !outOfBounds && !this.walkableTiles.some(
         t => t.col === Math.floor(ch.tileCol) && t.row === Math.floor(ch.tileRow)
       )
       if (outOfBounds || onNonWalkable) {
+        ch.seatId = null // seat may not exist in new theme
         this.relocateCharacterToWalkable(ch)
       }
     }
   }
 
-  /** Move a character to a random walkable tile */
+  /** Returns true if the tile at (col, row) has no WALL neighbor in the 4 cardinal directions */
+  private isSafeFromWalls(col: number, row: number): boolean {
+    const rows = this.tileMap.length
+    const cols = rows > 0 ? this.tileMap[0].length : 0
+    const WALL = 0 // TileType.WALL
+    const neighbors = [
+      [col, row - 1],
+      [col, row + 1],
+      [col - 1, row],
+      [col + 1, row],
+    ]
+    for (const [nc, nr] of neighbors) {
+      if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue
+      if (this.tileMap[nr][nc] === WALL) return false
+    }
+    return true
+  }
+
+  /** Move a character to a random walkable tile, preferring tiles at least 1 tile away from any WALL */
   private relocateCharacterToWalkable(ch: Character): void {
     if (this.walkableTiles.length === 0) return
-    const spawn = this.walkableTiles[Math.floor(Math.random() * this.walkableTiles.length)]
+    const safeTiles = this.walkableTiles.filter(t => this.isSafeFromWalls(t.col, t.row))
+    const candidates = safeTiles.length > 0 ? safeTiles : this.walkableTiles
+    const spawn = candidates[Math.floor(Math.random() * candidates.length)]
     ch.tileCol = spawn.col
     ch.tileRow = spawn.row
     ch.x = spawn.col * TILE_SIZE + TILE_SIZE / 2

@@ -1,4 +1,4 @@
-# Pixel Agents for IntelliJ
+# Pixel Office - AI Agent Visualizer
 
 An IntelliJ plugin that turns your Claude Code terminal sessions into animated pixel art characters in a virtual office.
 
@@ -6,30 +6,16 @@ Each Claude Code terminal you open spawns a character that walks around, sits at
 
 Ported from [Pixel Agents for VS Code](https://github.com/pablodelucca/pixel-agents) by Pablo De Lucca, with additional features for the IntelliJ Platform.
 
-![Pixel Agents screenshot](webview-ui/public/Screenshot.jpg)
-
 ## Themes
 
 ### Office (Default)
-<p align="center">
-  <img src="webview-ui/public/preview-default.png" alt="Office theme characters" height="48" style="image-rendering: pixelated;">
-</p>
-
-<!-- 스크린샷: webview-ui/public/screenshot-office.png -->
+![Office theme](webview-ui/public/screenshot-office.png)
 
 ### Alien (UFO)
-<p align="center">
-  <img src="webview-ui/public/preview-alien.png" alt="Alien theme characters" height="48" style="image-rendering: pixelated;">
-</p>
+![Alien theme](webview-ui/public/screenshot-alien.png)
 
-<!-- 스크린샷: webview-ui/public/screenshot-alien.png -->
-
-### Cat Tower
-<p align="center">
-  <img src="webview-ui/public/preview-cat.png" alt="Cat theme characters" height="48" style="image-rendering: pixelated;">
-</p>
-
-<!-- 스크린샷: webview-ui/public/screenshot-cat.png -->
+### Cat Cafe
+![Cat Cafe theme](webview-ui/public/screenshot-cat.png)
 
 ## Features
 
@@ -55,7 +41,7 @@ Ported from [Pixel Agents for VS Code](https://github.com/pablodelucca/pixel-age
 
 ### From JetBrains Marketplace
 
-Search for **Pixel Agents** in Settings > Plugins > Marketplace.
+Search for **Pixel Office** in Settings > Plugins > Marketplace.
 
 ### From ZIP
 

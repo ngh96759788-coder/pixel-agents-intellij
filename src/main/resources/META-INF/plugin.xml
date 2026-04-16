@@ -1,6 +1,6 @@
 <idea-plugin>
-    <id>com.pixelagents.intellij</id>
-    <name>Pixel Agents</name>
+    <id>com.namkunghoon.pixelagents</id>
+    <name>Pixel Office - AI Agent Visualizer</name>
     <vendor email="hoon@aladin.co.kr"
             url="https://github.com/ngh96759788-coder/pixel-agents-intellij">Namkung Hoon</vendor>
 

@@ -8,13 +8,36 @@ Ported from [Pixel Agents for VS Code](https://github.com/pablodelucca/pixel-age
 
 ![Pixel Agents screenshot](webview-ui/public/Screenshot.jpg)
 
+## Themes
+
+### Office (Default)
+<p align="center">
+  <img src="webview-ui/public/preview-default.png" alt="Office theme characters" height="48" style="image-rendering: pixelated;">
+</p>
+
+<!-- 스크린샷: webview-ui/public/screenshot-office.png -->
+
+### Alien (UFO)
+<p align="center">
+  <img src="webview-ui/public/preview-alien.png" alt="Alien theme characters" height="48" style="image-rendering: pixelated;">
+</p>
+
+<!-- 스크린샷: webview-ui/public/screenshot-alien.png -->
+
+### Cat Tower
+<p align="center">
+  <img src="webview-ui/public/preview-cat.png" alt="Cat theme characters" height="48" style="image-rendering: pixelated;">
+</p>
+
+<!-- 스크린샷: webview-ui/public/screenshot-cat.png -->
+
 ## Features
 
 - **One agent, one character** — every Claude Code terminal gets its own animated character
 - **Live activity tracking** — characters animate based on what the agent is actually doing (writing, reading, running commands)
 - **Sub-agent visualization** — Task/Agent sub-agents spawn as separate characters, including async background agents with independent JSONL tracking
 - **Office layout editor** — design your office with floors, walls, and 80+ furniture items
-- **Multiple themes** — default office, alien, cat, and zoo themes with unique characters and furniture
+- **Multiple themes** — default office, alien, and cat themes with unique characters and furniture
 - **Speech bubbles** — visual indicators when an agent is waiting for input or needs permission
 - **Sound notifications** — optional chime when an agent finishes its turn
 - **Animated furniture** — wall clocks tick, desk fans spin, water coolers bubble

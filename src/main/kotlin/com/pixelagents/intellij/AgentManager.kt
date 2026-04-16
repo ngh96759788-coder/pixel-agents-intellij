@@ -313,15 +313,8 @@ class AgentManager(
 
         if (candidates.isEmpty()) return
 
-        // Only remove agents if NO Claude process is running on the system.
-        // This avoids false removal when:
-        //   - Adopted agents don't have --session-id in their command line
-        //   - Claude is waiting idle at the prompt for user input
-        //   - Sub-agent work happens in separate files not tracked by main JSONL
-        if (isAnyClaudeRunning()) return
-
         for (id in candidates) {
-            println("[Pixel Agents] No claude processes running, removing idle agent $id")
+            println("[Pixel Agents] JSONL stale for ${Constants.SESSION_STALE_THRESHOLD_MS / 1000}s, removing agent $id")
             closeAgent(id)
         }
     }

@@ -11,8 +11,8 @@ object Constants {
     const val ADOPTION_MAX_AGE_MS = 10000L  // Only adopt JSONL files modified within last 10s
 
     // Session alive check
-    const val SESSION_CHECK_INTERVAL_MS = 30_000L  // Check every 30s
-    const val SESSION_STALE_THRESHOLD_MS = 60_000L // JSONL idle for 60s before checking process
+    const val SESSION_CHECK_INTERVAL_MS = 10_000L  // Check every 10s
+    const val SESSION_STALE_THRESHOLD_MS = 30_000L // JSONL idle for 30s → remove agent
 
     // Async sub-agent watcher timeouts
     const val SUBAGENT_JSONL_WAIT_TIMEOUT_MS = 30_000L   // Give up if file never appears

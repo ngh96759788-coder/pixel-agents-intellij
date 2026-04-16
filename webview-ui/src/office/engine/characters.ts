@@ -296,8 +296,20 @@ export function updateCharacter(
         break
       }
 
-      // Move toward next tile in path
+      // Validate next tile is still walkable (blocked tiles can change on theme switch)
       const nextTile = ch.path[0]
+      if (blockedTiles.has(`${nextTile.col},${nextTile.row}`)) {
+        // Path is stale — stop walking and return to idle
+        ch.path = []
+        ch.moveProgress = 0
+        ch.state = CharacterState.IDLE
+        ch.frame = 0
+        ch.frameTimer = 0
+        ch.wanderTimer = 0.5
+        break
+      }
+
+      // Move toward next tile in path
       ch.dir = directionBetween(ch.tileCol, ch.tileRow, nextTile.col, nextTile.row)
 
       ch.moveProgress += (WALK_SPEED_PX_PER_SEC / TILE_SIZE) * dt

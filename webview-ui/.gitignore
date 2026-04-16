@@ -27,6 +27,10 @@ dist-ssr
 */assets/*
 !*/assets/characters/
 !*/assets/characters-zoo/
+!*/assets/characters-cat/
 !*/assets/furniture-zoo/
+!*/assets/furniture-cat/
 !*/assets/default-layout.json
+!*/assets/default-layout-cat.json
 !*/assets/walls.png
+!*/assets/walls-cat.png

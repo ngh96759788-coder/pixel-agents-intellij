@@ -66,7 +66,7 @@ export function layoutToFurnitureInstances(furniture: PlacedFurniture[]): Furnit
     if (entry.canPlaceOnSurfaces) {
       for (let dr = 0; dr < entry.footprintH; dr++) {
         for (let dc = 0; dc < entry.footprintW; dc++) {
-          const deskZ = deskZByTile.get(`${item.col + dc},${item.row + dr}`)
+          const deskZ = deskZByTile.get(`${Math.floor(item.col) + dc},${Math.floor(item.row) + dr}`)
           if (deskZ !== undefined && deskZ + 0.5 > zY) zY = deskZ + 0.5
         }
       }

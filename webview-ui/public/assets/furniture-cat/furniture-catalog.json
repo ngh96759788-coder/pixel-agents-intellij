@@ -9,7 +9,8 @@
       "height": 32,
       "footprintW": 2,
       "footprintH": 2,
-      "isDesk": true
+      "isDesk": true,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_COUNTER_B",
@@ -20,7 +21,8 @@
       "height": 32,
       "footprintW": 2,
       "footprintH": 2,
-      "isDesk": true
+      "isDesk": true,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_COUNTER_C",
@@ -31,7 +33,8 @@
       "height": 32,
       "footprintW": 4,
       "footprintH": 2,
-      "isDesk": true
+      "isDesk": true,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_REGISTER",
@@ -41,7 +44,9 @@
       "width": 32,
       "height": 32,
       "footprintW": 2,
-      "footprintH": 2
+      "footprintH": 2,
+      "isDesk": true,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_CHALKBOARD",
@@ -52,7 +57,8 @@
       "height": 32,
       "footprintW": 2,
       "footprintH": 2,
-      "canPlaceOnWalls": true
+      "canPlaceOnWalls": true,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_CABINET_A",
@@ -62,7 +68,8 @@
       "width": 32,
       "height": 32,
       "footprintW": 2,
-      "footprintH": 2
+      "footprintH": 2,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_SHELF_A",
@@ -72,17 +79,20 @@
       "width": 32,
       "height": 32,
       "footprintW": 2,
-      "footprintH": 2
+      "footprintH": 2,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_TABLE_A",
       "label": "Cafe Table",
-      "category": "misc",
+      "category": "desks",
       "file": "furniture-cat/CAT-TABLE-A.png",
       "width": 32,
       "height": 32,
       "footprintW": 2,
-      "footprintH": 2
+      "footprintH": 2,
+      "isDesk": true,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_CHAIR_A",
@@ -94,7 +104,8 @@
       "footprintW": 1,
       "footprintH": 1,
       "groupId": "cat_chair_a",
-      "orientation": "front"
+      "orientation": "front",
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_AQUARIUM",
@@ -104,7 +115,8 @@
       "width": 32,
       "height": 16,
       "footprintW": 2,
-      "footprintH": 1
+      "footprintH": 1,
+      "renderOffsetY": -6
     },
     {
       "id": "CAT_PLANT_A",
@@ -114,7 +126,8 @@
       "width": 16,
       "height": 16,
       "footprintW": 1,
-      "footprintH": 1
+      "footprintH": 1,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_BOWL",
@@ -136,7 +149,9 @@
       "width": 16,
       "height": 16,
       "footprintW": 1,
-      "footprintH": 1
+      "footprintH": 1,
+      "canPlaceOnSurfaces": true,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_BENCH_A",
@@ -147,7 +162,8 @@
       "height": 32,
       "footprintW": 3,
       "footprintH": 2,
-      "isDesk": true
+      "isDesk": true,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_RECYCLE_BIN",
@@ -157,7 +173,8 @@
       "width": 16,
       "height": 32,
       "footprintW": 1,
-      "footprintH": 1
+      "footprintH": 1,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_FOOD_1",
@@ -240,6 +257,7 @@
       "height": 16,
       "footprintW": 1,
       "footprintH": 1,
+      "canPlaceOnSurfaces": true,
       "groupId": "cat_fish_bowl",
       "orientation": "front",
       "state": "off",
@@ -248,7 +266,8 @@
       "animSequence": [
         "CAT_FISH_BOWL_1",
         "CAT_FISH_BOWL_2"
-      ]
+      ],
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_FISH_BOWL_2",
@@ -259,11 +278,13 @@
       "height": 16,
       "footprintW": 1,
       "footprintH": 1,
+      "canPlaceOnSurfaces": true,
       "groupId": "cat_fish_bowl",
       "orientation": "front",
       "state": "on",
       "autoAnimate": true,
-      "animIntervalSec": 1.0
+      "animIntervalSec": 1.0,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_YARN_BALL_1",
@@ -282,7 +303,8 @@
       "animSequence": [
         "CAT_YARN_BALL_1",
         "CAT_YARN_BALL_2"
-      ]
+      ],
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_YARN_BALL_2",
@@ -297,7 +319,8 @@
       "orientation": "front",
       "state": "on",
       "autoAnimate": true,
-      "animIntervalSec": 0.8
+      "animIntervalSec": 0.8,
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_TOY_1",
@@ -308,6 +331,7 @@
       "height": 16,
       "footprintW": 1,
       "footprintH": 1,
+      "canPlaceOnSurfaces": true,
       "groupId": "cat_toy",
       "orientation": "front",
       "state": "off",
@@ -316,7 +340,8 @@
       "animSequence": [
         "CAT_TOY_1",
         "CAT_TOY_2"
-      ]
+      ],
+      "renderOffsetY": -3
     },
     {
       "id": "CAT_TOY_2",
@@ -327,11 +352,13 @@
       "height": 16,
       "footprintW": 1,
       "footprintH": 1,
+      "canPlaceOnSurfaces": true,
       "groupId": "cat_toy",
       "orientation": "front",
       "state": "on",
       "autoAnimate": true,
-      "animIntervalSec": 0.6
+      "animIntervalSec": 0.6,
+      "renderOffsetY": -3
     }
   ]
 }

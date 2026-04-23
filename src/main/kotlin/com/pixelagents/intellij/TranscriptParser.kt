@@ -25,6 +25,22 @@ class TranscriptParser(
     /** Callback to stop watching an async sub-agent's file once it finishes. */
     var onAsyncSubagentFinished: ((agentId: Int, parentToolId: String) -> Unit)? = null
 
+    /**
+     * Callback fired when a parent agent launches an Agent/Task sub-agent tool.
+     * Claude Code no longer writes an `isAsync:true` marker, so we start watching
+     * the `<sessionId>/subagents/` folder immediately to catch the newly-created
+     * agent-<subId>.jsonl and bind it FIFO to pending parent tool_use ids.
+     */
+    var onSubagentToolUseStarted: ((agentId: Int, parentToolId: String) -> Unit)? = null
+
+    /**
+     * "Last-chance" synchronous binding hook. parent JSONL can arrive in
+     * bursts so a tool_result may reach processUserRecord before the folder
+     * watcher's next tick; calling this gives the binder one more chance to
+     * pair new sub-JSONL files with pending parent tool_use ids.
+     */
+    var onTryBindSubagentFiles: ((agentId: Int) -> Unit)? = null
+
     fun formatToolStatus(toolName: String, input: Map<String, Any?>): String {
         fun base(p: Any?): String = if (p is String) File(p).name else ""
         return when (toolName) {
@@ -108,6 +124,15 @@ class TranscriptParser(
                         "toolId" to blockId,
                         "status" to status,
                     ))
+
+                    // Register this Agent/Task tool_use so the folder watcher can
+                    // bind the next agent-*.jsonl file that appears under
+                    // <sessionId>/subagents/ — current Claude Code stopped emitting
+                    // the isAsync marker, so we must watch the directory ourselves.
+                    if (toolName in SUBAGENT_TOOL_NAMES) {
+                        agent.pendingSubagentIds.offer(blockId)
+                        onSubagentToolUseStarted?.invoke(agentId, blockId)
+                    }
                 }
             }
             if (hasNonExemptTool) {
@@ -139,12 +164,27 @@ class TranscriptParser(
                         val completedToolId = block["tool_use_id"] as String
                         val wasSubagentTool = agent.activeToolNames[completedToolId] in SUBAGENT_TOOL_NAMES
 
+                        // Last-chance binding: parent JSONL may arrive in a single burst
+                        // (Agent tool_use + tool_result both in one readNewLines tick),
+                        // so the folder-watcher thread hasn't bound this sub yet. Give
+                        // the binder one more synchronous shot before we decide whether
+                        // to despawn the character.
+                        if (wasSubagentTool) {
+                            onTryBindSubagentFiles?.invoke(agentId)
+                        }
+
+                        val alreadyBoundAsync = agent.asyncSubagents.containsKey(completedToolId)
                         if (isAsyncLaunch && !asyncAgentId.isNullOrBlank() && wasSubagentTool) {
-                            // Async sub-agent just launched — don't clear the character.
-                            // Start watching its separate JSONL so tool activity animates properly.
+                            // Legacy path: Claude Code used to set isAsync=true here.
                             registerAsyncSubagent(agentId, agent, completedToolId, asyncAgentId)
+                        } else if (wasSubagentTool && alreadyBoundAsync) {
+                            // Current Claude Code: tool_result arrives after sub finished. The
+                            // sub's own end_turn in its JSONL will despawn the character via
+                            // clearAsyncSubagent, so do nothing here — just let it proceed.
                         } else if (wasSubagentTool) {
-                            // Sync Task/Agent completed — clear sub-agent tools as before
+                            // Sub-agent tool completed but we never bound a sub-JSONL for it.
+                            // Drop the pending placeholder (if any) and clear immediately.
+                            agent.pendingSubagentIds.remove(completedToolId)
                             agent.activeSubagentToolIds.remove(completedToolId)
                             agent.activeSubagentToolNames.remove(completedToolId)
                             sendToWebview("subagentClear", mapOf(
@@ -153,10 +193,11 @@ class TranscriptParser(
                             ))
                         }
 
-                        // Also clear any async sub-agent tied to this parent tool id (sync completion path)
-                        if (!isAsyncLaunch) {
-                            clearAsyncSubagent(agentId, agent, completedToolId)
-                        }
+                        // Do NOT call clearAsyncSubagent here: if the sub-JSONL watcher
+                        // is still running we want its end_turn (or idle timeout) to
+                        // trigger despawn. Calling it here would kill the character
+                        // mid-work when the parent tool_result is what's delayed, not
+                        // the sub's actual completion.
 
                         agent.activeToolIds.remove(completedToolId)
                         agent.activeToolStatuses.remove(completedToolId)
@@ -201,11 +242,16 @@ class TranscriptParser(
             agent.activeSubagentToolIds.keys.retainAll(preservedSubIds)
             agent.activeSubagentToolNames.keys.retainAll(preservedSubIds)
 
-            if (agent.asyncSubagents.isEmpty()) {
-                sendToWebview("agentToolsClear", mapOf("id" to agentId))
-            } else {
-                // Clear only the parent's own activity bubble, keep sub-agent characters alive
+            // Preserve sub-agent characters when EITHER an async sub-agent is
+            // already bound OR a parent Agent tool_use is still waiting for
+            // its sub-JSONL to appear (folder watcher is racing with the
+            // parent's turn_duration record — see FileWatcher.ensureSubagentFolderWatch).
+            val hasLiveOrPendingSubs =
+                agent.asyncSubagents.isNotEmpty() || agent.pendingSubagentIds.isNotEmpty()
+            if (hasLiveOrPendingSubs) {
                 sendToWebview("agentToolsClearParentOnly", mapOf("id" to agentId))
+            } else {
+                sendToWebview("agentToolsClear", mapOf("id" to agentId))
             }
         }
 
@@ -246,10 +292,14 @@ class TranscriptParser(
                     val status = formatToolStatus(toolName, input)
                     val blockId = block["id"] as String
 
-                    val subTools = agent.activeSubagentToolIds.getOrPut(parentToolId) { mutableSetOf() }
+                    // computeIfAbsent: atomic on ConcurrentHashMap, prevents lost updates
+                    // when two threads race to initialize the same parentToolId bucket.
+                    val subTools = (agent.activeSubagentToolIds as java.util.concurrent.ConcurrentHashMap<String, MutableSet<String>>)
+                        .computeIfAbsent(parentToolId) { ConcurrentHashMap.newKeySet() }
                     subTools.add(blockId)
 
-                    val subNames = agent.activeSubagentToolNames.getOrPut(parentToolId) { mutableMapOf() }
+                    val subNames = (agent.activeSubagentToolNames as java.util.concurrent.ConcurrentHashMap<String, MutableMap<String, String>>)
+                        .computeIfAbsent(parentToolId) { ConcurrentHashMap() }
                     subNames[blockId] = toolName
 
                     if (toolName !in TimerManager.PERMISSION_EXEMPT_TOOLS) {
@@ -405,10 +455,12 @@ class TranscriptParser(
                 val status = formatToolStatus(toolName, input)
                 val blockId = block["id"] as String
 
-                val subTools = agent.activeSubagentToolIds.getOrPut(parentToolId) { mutableSetOf() }
+                val subTools = (agent.activeSubagentToolIds as java.util.concurrent.ConcurrentHashMap<String, MutableSet<String>>)
+                    .computeIfAbsent(parentToolId) { ConcurrentHashMap.newKeySet() }
                 subTools.add(blockId)
 
-                val subNames = agent.activeSubagentToolNames.getOrPut(parentToolId) { mutableMapOf() }
+                val subNames = (agent.activeSubagentToolNames as java.util.concurrent.ConcurrentHashMap<String, MutableMap<String, String>>)
+                    .computeIfAbsent(parentToolId) { ConcurrentHashMap() }
                 subNames[blockId] = toolName
 
                 if (toolName !in TimerManager.PERMISSION_EXEMPT_TOOLS) {
@@ -427,8 +479,11 @@ class TranscriptParser(
             timerManager.startPermissionTimer(agentId)
         }
 
-        // Sub-agent signaled end of its turn → it's done
-        if (stopReason == "end_turn") {
+        // Sub-agent signaled end of its turn → it's done.
+        // Treat any non-tool stop reason as completion so a sub-agent that
+        // exits via stop_sequence / max_tokens doesn't linger until the 2min
+        // idle watchdog.
+        if (stopReason != null && stopReason != "tool_use") {
             clearAsyncSubagent(agentId, agent, parentToolId)
         }
     }

@@ -4,6 +4,7 @@ object Constants {
     // Timing (ms)
     const val JSONL_POLL_INTERVAL_MS = 1000L
     const val FILE_WATCHER_POLL_INTERVAL_MS = 2000L
+    const val SUBAGENT_FOLDER_POLL_INTERVAL_MS = 500L
     const val PROJECT_SCAN_INTERVAL_MS = 1000L
     const val TOOL_DONE_DELAY_MS = 300L
     const val PERMISSION_TIMER_DELAY_MS = 7000L
@@ -12,7 +13,7 @@ object Constants {
 
     // Session alive check
     const val SESSION_CHECK_INTERVAL_MS = 10_000L  // Check every 10s
-    const val SESSION_STALE_THRESHOLD_MS = 30_000L // JSONL idle for 30s → remove agent
+    const val SESSION_STALE_THRESHOLD_MS = 60_000L // JSONL idle for 60s → remove agent
 
     // Async sub-agent watcher timeouts
     const val SUBAGENT_JSONL_WAIT_TIMEOUT_MS = 30_000L   // Give up if file never appears

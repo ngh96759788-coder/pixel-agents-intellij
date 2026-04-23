@@ -19,7 +19,7 @@ export const SEAT_REST_MIN_SEC = 5.0
 export const SEAT_REST_MAX_SEC = 10.0
 export const IDLE_DESPAWN_SEC = 60.0
 export const MAX_VISIBLE_CHARACTERS = 6
-export const SUBAGENT_DESPAWN_DELAY_SEC = 60.0
+export const SUBAGENT_DESPAWN_DELAY_SEC = 30.0
 
 // ── Sub-agent Type → Fixed Palette Mapping ──────────────────
 // Maps subagent_type to a fixed palette index (0–5) so orchestration

@@ -391,7 +391,47 @@ export class OfficeState {
   addSubagent(parentAgentId: number, parentToolId: string): number {
     const key = `${parentAgentId}:${parentToolId}`
     if (this.subagentIdMap.has(key)) return this.subagentIdMap.get(key)!
-    if (this.characters.size >= MAX_VISIBLE_CHARACTERS) return 0 // at capacity
+
+    // Reuse an idle (completed, still wandering) sub-agent instead of spawning
+    // a new one. This avoids the jarring "despawn + respawn" flicker when a
+    // new Task arrives right as the previous one is cooling down, and keeps
+    // us within MAX_VISIBLE_CHARACTERS without dropping work.
+    for (const ch of this.characters.values()) {
+      if (!ch.isSubagent) continue
+      if (!ch.isCompleted) continue
+      if (ch.matrixEffect === 'despawn') continue
+      ch.isCompleted = false
+      ch.isActive = true
+      ch.idleTimer = 0
+      ch.currentTool = null
+      ch.parentAgentId = parentAgentId
+      ch.bubbleType = null
+      ch.path = []
+      ch.moveProgress = 0
+      // Reclaim the seat if it's still free; otherwise clear seatId so the
+      // character TYPEs in place (someone else took it while we were idle).
+      if (ch.seatId) {
+        const seat = this.seats.get(ch.seatId)
+        if (seat) {
+          if (seat.assigned) ch.seatId = null
+          else seat.assigned = true
+        } else {
+          ch.seatId = null
+        }
+      }
+      this.subagentIdMap.set(key, ch.id)
+      this.subagentMeta.set(ch.id, { parentAgentId, parentToolId })
+      return ch.id
+    }
+
+    // Count only non-despawning characters against the cap. Otherwise a fresh
+    // round arriving while previous subs are still playing their matrix
+    // despawn animation would be rejected (characters.size would still be 6).
+    let activeCount = 0
+    for (const c of this.characters.values()) {
+      if (c.matrixEffect !== 'despawn') activeCount++
+    }
+    if (activeCount >= MAX_VISIBLE_CHARACTERS) return 0 // at capacity
 
     const id = this.nextSubagentId--
     const parentCh = this.characters.get(parentAgentId)
@@ -553,6 +593,13 @@ export class OfficeState {
     ch.isActive = false
     ch.idleTimer = 0 // Start counting from completion
     ch.currentTool = null
+    // Release the seat back to the pool so a new sub-agent doesn't spawn
+    // seatless on top of the main agent. If this character gets reused by
+    // addSubagent before despawning, the reuse path re-claims the seat.
+    if (ch.seatId) {
+      const seat = this.seats.get(ch.seatId)
+      if (seat) seat.assigned = false
+    }
     // Clean up tracking maps so the key can be reused
     this.subagentIdMap.delete(key)
     this.subagentMeta.delete(id)
@@ -566,12 +613,23 @@ export class OfficeState {
   setAgentActive(id: number, active: boolean): void {
     const ch = this.characters.get(id)
     if (ch) {
+      const wasActive = ch.isActive
       ch.isActive = active
       if (!active) {
         // Stay seated for ~40s after turn ends before getting up to wander
         ch.seatTimer = SEAT_REST_MIN_SEC + Math.random() * (SEAT_REST_MAX_SEC - SEAT_REST_MIN_SEC)
         ch.path = []
         ch.moveProgress = 0
+      } else if (!wasActive) {
+        // Interrupt any wander already in progress so the tool animation
+        // starts immediately. Without this a seatless sub-agent keeps walking
+        // its current path before FSM notices isActive flipped.
+        ch.path = []
+        ch.moveProgress = 0
+        if (ch.state === CharacterState.WALK) {
+          ch.state = CharacterState.IDLE
+        }
+        ch.wanderTimer = 0
       }
       this.rebuildFurnitureInstances()
     }

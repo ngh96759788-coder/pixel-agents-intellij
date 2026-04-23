@@ -138,10 +138,17 @@ class AgentManager(
     }
 
     fun removeAgent(agentId: Int) {
+        val agent = agents[agentId]
         fileWatcher.stopWatching(agentId)
         agents.remove(agentId)
         if (activeAgentIdRef() == agentId) {
             setActiveAgentId(null)
+        }
+        // Forget this JSONL so that if the user keeps talking to the same
+        // Claude CLI after a 60s idle disconnect, the next JSONL write
+        // re-adopts the session as a new agent instead of being ignored.
+        if (agent != null) {
+            knownJsonlFiles.remove(agent.jsonlFile)
         }
         persistAgents()
     }

@@ -199,26 +199,33 @@ class FileWatcher(
         }
 
         for (file in files) {
-            if (knownJsonlFiles.add(file)) {
-                // Check if file is actively being written to (recent modification)
-                val jsonlFile = File(file)
-                val ageMs = System.currentTimeMillis() - jsonlFile.lastModified()
-                if (ageMs > Constants.ADOPTION_MAX_AGE_MS) continue
+            if (file in knownJsonlFiles) continue
 
-                val activeId = activeAgentIdRef()
-                if (activeId != null && agents.containsKey(activeId)) {
-                    // Active agent focused → /clear reassignment
-                    LOG.info("New JSONL detected: ${jsonlFile.name}, reassigning to agent $activeId")
-                    reassignAgentToFile(activeId, file)
+            val jsonlFile = File(file)
+            val ageMs = System.currentTimeMillis() - jsonlFile.lastModified()
+            if (ageMs > Constants.ADOPTION_MAX_AGE_MS) {
+                // Too old to adopt right now. Do NOT add to knownJsonlFiles —
+                // if the user types again later, lastModified updates and the
+                // next scan tick will re-evaluate this file for adoption.
+                continue
+            }
+
+            // Adoptable → mark known first so we don't re-process on the next tick.
+            knownJsonlFiles.add(file)
+
+            val activeId = activeAgentIdRef()
+            if (activeId != null && agents.containsKey(activeId)) {
+                // Active agent focused → /clear reassignment
+                LOG.info("New JSONL detected: ${jsonlFile.name}, reassigning to agent $activeId")
+                reassignAgentToFile(activeId, file)
+            } else {
+                // No active agent (or stale id) → adopt as new agent
+                if (activeId != null) {
+                    LOG.info("Stale activeAgentId=$activeId, falling back to adoption for ${jsonlFile.name}")
                 } else {
-                    // No active agent (or stale id) → adopt as new agent
-                    if (activeId != null) {
-                        LOG.info("Stale activeAgentId=$activeId, falling back to adoption for ${jsonlFile.name}")
-                    } else {
-                        LOG.info("Adopting new JSONL: ${jsonlFile.name}")
-                    }
-                    onNewAgentFile?.invoke(file)
+                    LOG.info("Adopting new JSONL: ${jsonlFile.name}")
                 }
+                onNewAgentFile?.invoke(file)
             }
         }
     }

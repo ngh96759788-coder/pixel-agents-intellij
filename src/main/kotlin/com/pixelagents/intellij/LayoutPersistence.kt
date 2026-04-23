@@ -8,10 +8,13 @@ import com.intellij.openapi.fileChooser.FileChooserFactory
 import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.project.Project
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.*
 
-class LayoutPersistence : Disposable {
+class LayoutPersistence(projectBasePath: String?) : Disposable {
 
     private val gson = Gson()
     @Volatile
@@ -23,10 +26,20 @@ class LayoutPersistence : Disposable {
         Thread(r, "PixelAgents-LayoutWatch").apply { isDaemon = true }
     }
 
+    /**
+     * Per-project scope directory so multiple IntelliJ windows (each opened
+     * on a different project) don't stomp on each other's layout / theme via
+     * the shared ~/.pixel-agents/layout.json file. Falls back to "default"
+     * when no base path is available.
+     */
+    private val scopeDir: String =
+        projectBasePath?.replace(Regex("[:\\\\/]"), "-")?.ifBlank { null } ?: "default"
+
     private fun getLayoutFilePath(): String {
         return Paths.get(
             System.getProperty("user.home"),
             Constants.LAYOUT_FILE_DIR,
+            scopeDir,
             Constants.LAYOUT_FILE_NAME
         ).toString()
     }
@@ -52,9 +65,32 @@ class LayoutPersistence : Disposable {
             file.parentFile?.mkdirs()
             val tmpFile = File("$filePath.tmp")
             tmpFile.writeText(gson.toJson(layout))
-            tmpFile.renameTo(file)
+            atomicReplace(tmpFile, file)
         } catch (e: Exception) {
             println("[Pixel Agents] Failed to write layout file: $e")
+        }
+    }
+
+    /**
+     * Atomically replace `dst` with `src`.
+     *
+     * On Windows, `File.renameTo` returns false when the destination already
+     * exists, which silently dropped the user's layout edits (sleuth C4).
+     * We use `Files.move` with ATOMIC_MOVE + REPLACE_EXISTING; if the
+     * filesystem can't do an atomic move, fall back to a plain replacing move
+     * so the write at least succeeds.
+     */
+    private fun atomicReplace(src: File, dst: File) {
+        val srcPath = src.toPath()
+        val dstPath = dst.toPath()
+        try {
+            Files.move(
+                srcPath, dstPath,
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(srcPath, dstPath, StandardCopyOption.REPLACE_EXISTING)
         }
     }
 
@@ -62,8 +98,14 @@ class LayoutPersistence : Disposable {
         settings: PixelAgentsSettings,
         defaultLayout: Map<String, Any?>?
     ): Map<String, Any?>? {
-        // 1. Try file
+        // 1. Try file (project-scoped path)
         readLayoutFromFile()?.let { return it }
+
+        // NOTE: we intentionally do NOT fall back to the legacy global
+        // ~/.pixel-agents/layout.json. Doing so shadowed the bundled default
+        // (which ships with each release and reflects the author's latest
+        // office layout) with a potentially stale user-saved copy. Users who
+        // want to import an old layout can still do so via Import Layout.
 
         // 2. Try migrating from old settings
         val fromSettings = settings.savedLayout
@@ -94,6 +136,7 @@ class LayoutPersistence : Disposable {
         return Paths.get(
             System.getProperty("user.home"),
             Constants.LAYOUT_FILE_DIR,
+            scopeDir,
             layoutFileName
         ).toString()
     }
@@ -119,7 +162,7 @@ class LayoutPersistence : Disposable {
             file.parentFile?.mkdirs()
             val tmpFile = File("$filePath.tmp")
             tmpFile.writeText(gson.toJson(layout))
-            tmpFile.renameTo(file)
+            atomicReplace(tmpFile, file)
         } catch (e: Exception) {
             println("[Pixel Agents] Failed to write theme layout file: $e")
         }

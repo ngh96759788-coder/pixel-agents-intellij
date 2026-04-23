@@ -73,7 +73,7 @@
                     canCloseContents="false"
                     factoryClass="com.pixelagents.intellij.PixelAgentsToolWindowFactory"
                     icon="/icons/pixelAgents.svg"/>
-        <applicationService
+        <projectService
             serviceImplementation="com.pixelagents.intellij.PixelAgentsSettings"/>
         <notificationGroup id="Pixel Agents"
                            displayType="BALLOON"/>

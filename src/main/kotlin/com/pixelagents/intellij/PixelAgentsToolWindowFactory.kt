@@ -65,9 +65,9 @@ class PixelAgentsPanel(
     private lateinit var agentManager: AgentManager
     private val fileWatcher: FileWatcher
     private val assetLoader = AssetLoader()
-    private val layoutPersistence = LayoutPersistence()
+    private val layoutPersistence = LayoutPersistence(project.basePath)
     private lateinit var terminalDetector: TerminalDetector
-    private val settings = PixelAgentsSettings.getInstance()
+    private val settings = PixelAgentsSettings.getInstance(project)
     private val gson = Gson()
 
     val nextAgentId = AtomicInteger(1)
@@ -168,19 +168,22 @@ class PixelAgentsPanel(
                     val jarPath = java.net.URLDecoder.decode(
                         indexUrl.path.substringAfter("file:").substringBefore("!"), "UTF-8"
                     )
-                    val jarFile = java.util.jar.JarFile(jarPath)
-                    val entries = jarFile.entries()
-                    while (entries.hasMoreElements()) {
-                        val entry = entries.nextElement()
-                        if (entry.name.startsWith("webview/") && !entry.isDirectory) {
-                            val targetFile = File(tempDir, entry.name.removePrefix("webview/"))
-                            targetFile.parentFile?.mkdirs()
-                            jarFile.getInputStream(entry).use { input ->
-                                Files.copy(input, targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                    // use {} ensures the JarFile handle is always closed even if an
+                    // extraction throws — avoids leaking a file descriptor for the
+                    // lifetime of the JVM (M9 / reviewer Top 5 #3).
+                    java.util.jar.JarFile(jarPath).use { jarFile ->
+                        val entries = jarFile.entries()
+                        while (entries.hasMoreElements()) {
+                            val entry = entries.nextElement()
+                            if (entry.name.startsWith("webview/") && !entry.isDirectory) {
+                                val targetFile = File(tempDir, entry.name.removePrefix("webview/"))
+                                targetFile.parentFile?.mkdirs()
+                                jarFile.getInputStream(entry).use { input ->
+                                    Files.copy(input, targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                                }
                             }
                         }
                     }
-                    jarFile.close()
                     LOG.info("Extracted webview resources to: $tempDir")
                     return tempDir
                 }

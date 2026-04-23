@@ -1,13 +1,13 @@
 package com.pixelagents.intellij
 
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.*
+import com.intellij.openapi.project.Project
 
 @State(
     name = "PixelAgentsSettings",
     storages = [Storage("pixelAgents.xml")]
 )
-@Service(Service.Level.APP)
+@Service(Service.Level.PROJECT)
 class PixelAgentsSettings : PersistentStateComponent<PixelAgentsSettings.State> {
 
     data class State(
@@ -46,7 +46,7 @@ class PixelAgentsSettings : PersistentStateComponent<PixelAgentsSettings.State> 
         set(value) { myState.theme = value }
 
     companion object {
-        fun getInstance(): PixelAgentsSettings =
-            ApplicationManager.getApplication().getService(PixelAgentsSettings::class.java)
+        fun getInstance(project: Project): PixelAgentsSettings =
+            project.getService(PixelAgentsSettings::class.java)
     }
 }

@@ -27,6 +27,7 @@ class AgentManager(
     private val sendToWebview: (String, Map<String, Any?>) -> Unit,
     private val fileWatcher: FileWatcher,
     private val settings: PixelAgentsSettings,
+    private val instanceManifest: InstanceManifest,
 ) : Disposable {
 
     companion object {
@@ -45,28 +46,20 @@ class AgentManager(
         return Paths.get(System.getProperty("user.home"), ".claude", "projects", dirName).toString()
     }
 
-    @Suppress("DEPRECATION")
     fun launchNewTerminal() {
         val idx = nextTerminalIndex.getAndIncrement()
         val terminalName = "${Constants.TERMINAL_NAME_PREFIX} #$idx"
         val cwd = project.basePath
         val sessionId = UUID.randomUUID().toString()
 
-        // Create terminal and send claude command
-        try {
-            val terminalManager = TerminalToolWindowManager.getInstance(project)
-            val widget = terminalManager.createLocalShellWidget(cwd, terminalName)
-            // Unset CLAUDECODE to prevent "nested session" error when IDE was launched from Claude
-            widget.executeCommand("env -u CLAUDECODE claude --session-id $sessionId")
-        } catch (e: Exception) {
-            LOG.warn("Failed to create terminal", e)
-        }
-
         val projectDir = getProjectDirPath(cwd) ?: run {
             LOG.warn("No project dir, cannot track agent")
             return
         }
 
+        // Reserve the JSONL path BEFORE launching claude. If a project scanner
+        // is already running for this dir, it could otherwise see the new file
+        // and mis-adopt it as a separate agent before we register it here.
         val expectedFile = Paths.get(projectDir, "$sessionId.jsonl").toString()
         knownJsonlFiles.add(expectedFile)
 
@@ -80,40 +73,157 @@ class AgentManager(
         agents[id] = agent
         setActiveAgentId(id)
         persistAgents()
-        sendToWebview("agentCreated", mapOf("id" to id))
+        // Claim ownership in the cross-IDE manifest so peer plugin instances
+        // don't try to adopt this session as their own.
+        instanceManifest.registerSession(expectedFile)
+        sendToWebview("agentCreated", mapOf(
+            "id" to id,
+            "isExternal" to false,
+            "displayName" to terminalName, // real IDE terminal tab we just created
+        ))
+
+        // Now safe to launch — any JSONL writes will see this file as known.
+        try {
+            val terminalManager = TerminalToolWindowManager.getInstance(project)
+            val widget = terminalManager.createShellWidget(cwd, terminalName, true, true)
+            // Unset CLAUDECODE to prevent "nested session" error when IDE was launched from Claude
+            val shellWidget = widget as? org.jetbrains.plugins.terminal.ShellTerminalWidget
+            shellWidget?.executeCommand("env -u CLAUDECODE claude --session-id $sessionId")
+                ?: LOG.warn("Terminal widget is not a ShellTerminalWidget; cannot send claude command")
+        } catch (e: Exception) {
+            LOG.warn("Failed to create terminal", e)
+        }
 
         fileWatcher.ensureProjectScan(projectDir)
         fileWatcher.startJsonlPoll(id, agent)
     }
 
-    /** Adopt an externally-started Claude session (no --session-id) as a new agent */
+    /** Adopt a Claude session that this window's terminal launched directly
+     *  (`claude` typed without going through + Agent). Peer-owned sessions are
+     *  filtered upstream in FileWatcher; anything reaching here is genuinely
+     *  ours — claim it in the manifest and surface it as a normal character,
+     *  not faded/external. */
     fun adoptAgent(jsonlFilePath: String) {
+        if (instanceManifest.isOwnedByPeer(jsonlFilePath)) {
+            LOG.info("adoptAgent: skipping peer-owned JSONL ${File(jsonlFilePath).name}")
+            return
+        }
         val id = nextAgentId.getAndIncrement()
         val idx = nextTerminalIndex.getAndIncrement()
         val terminalName = "${Constants.TERMINAL_NAME_PREFIX} #$idx"
-        val projectDir = getProjectDirPath() ?: return
+        // Use the JSONL's actual parent dir as projectDir — for a worktree
+        // session this is its own project-hash dir, not the IDE basePath. Falls
+        // back to basePath only if the path somehow has no parent.
+        val projectDir = File(jsonlFilePath).parent ?: getProjectDirPath() ?: return
+        // Branch label if this session lives in a known worktree of the open repo.
+        val worktreeBranch = fileWatcher.worktreeBranchForFile(jsonlFilePath)
 
         val agent = AgentState(
             id = id,
             terminalName = terminalName,
             projectDir = projectDir,
             jsonlFile = jsonlFilePath,
+            isExternal = false,
+            isAdopted = true,
+            worktreeBranch = worktreeBranch,
         )
         agents[id] = agent
+        knownJsonlFiles.add(jsonlFilePath)
+        instanceManifest.registerSession(jsonlFilePath)
         persistAgents()
-        sendToWebview("agentCreated", mapOf("id" to id))
+        // Adopted: displayName left empty so the webview falls back to
+        // `main ${id}` instead of showing the synthetic internal name.
+        sendToWebview("agentCreated", mapOf(
+            "id" to id,
+            "isExternal" to false,
+            "displayName" to "",
+            "worktreeBranch" to worktreeBranch,
+        ))
         fileWatcher.startFileWatching(id, jsonlFilePath)
         fileWatcher.readNewLines(id)
         LOG.info("Adopted agent $id from ${java.io.File(jsonlFilePath).name}")
     }
 
+    /** Adopt an EXTERNAL Claude session surfaced by unified-view discovery
+     *  (BEHAVIOR_SPEC §4) — a peer IntelliJ window's CLI or any other
+     *  ~/.claude/projects activity. Unlike [adoptAgent], this deliberately
+     *  KEEPS peer-owned sessions (that's the whole point of unified view):
+     *   - `isExternal = true` → webview renders the character at 85% opacity.
+     *   - `isAdopted = true`, no terminalRef → no synthetic name shown, and
+     *     terminal-focus/close logic skips it.
+     *   - NOT claimed in the instance manifest (it isn't ours).
+     *   - NOT persisted (transient; never restored across IDE restarts).
+     *   - Normal JSONL watching so status/tools animate like any agent. */
+    fun adoptExternalAgent(jsonlFilePath: String) {
+        // Never double-adopt, and never shadow a session we already track
+        // (own or external). The discovery scanner also guards on
+        // knownJsonlFiles, but re-check here since adoption may race.
+        if (jsonlFilePath in knownJsonlFiles) return
+        if (agents.values.any { it.jsonlFile == jsonlFilePath }) return
+
+        val id = nextAgentId.getAndIncrement()
+        // Use the JSONL's own parent dir as projectDir (a foreign project-hash
+        // dir, not this IDE's basePath).
+        val projectDir = File(jsonlFilePath).parent ?: return
+        // Synthetic internal name that can never collide with a real IDE
+        // terminal tab, so onTerminalClosed / focusAgent tab-matching ignore it.
+        val terminalName = "external:${File(jsonlFilePath).nameWithoutExtension}"
+
+        val agent = AgentState(
+            id = id,
+            terminalName = terminalName,
+            projectDir = projectDir,
+            jsonlFile = jsonlFilePath,
+            isExternal = true,
+            isAdopted = true,
+        )
+        agents[id] = agent
+        knownJsonlFiles.add(jsonlFilePath)
+        // NOTE: no instanceManifest.registerSession — externals are peer-owned.
+        // NOTE: no persistAgents — externals are transient (see persistAgents filter).
+        sendToWebview("agentCreated", mapOf(
+            "id" to id,
+            "isExternal" to true,
+            // Adopted → empty displayName so the webview falls back to its own
+            // label instead of a synthetic internal name.
+            "displayName" to "",
+        ))
+        fileWatcher.startFileWatching(id, jsonlFilePath)
+        fileWatcher.readNewLines(id)
+        LOG.info("Adopted EXTERNAL agent $id from ${File(jsonlFilePath).name}")
+    }
+
+    /** Close every currently-tracked external agent (unified view toggled OFF).
+     *  Uses the normal close path (which kills no terminal — externals have
+     *  none) so each despawns in the webview and frees its file watcher. */
+    fun closeAllExternalAgents() {
+        for (id in agents.values.filter { it.isExternal }.map { it.id }) {
+            closeAgent(id)
+        }
+    }
+
     fun focusAgent(agentId: Int) {
-        agents[agentId] ?: return
-        // Focus the terminal tool window
+        val agent = agents[agentId] ?: return
         try {
             val toolWindow = com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
                 .getToolWindow("Terminal")
-            toolWindow?.show()
+            // Try to find the specific terminal tab matching this agent's terminalName.
+            // Falls back to revealing the JSONL file for adopted cross-project agents
+            // whose terminal lives in another IntelliJ window (or no terminal at all).
+            val matchingContent = toolWindow?.contentManager?.contents
+                ?.firstOrNull { it.displayName == agent.terminalName }
+            if (matchingContent != null) {
+                toolWindow.show {
+                    toolWindow.contentManager.setSelectedContent(matchingContent)
+                }
+            } else {
+                val jsonlFile = File(agent.jsonlFile)
+                if (jsonlFile.exists()) {
+                    RevealFileAction.openFile(jsonlFile)
+                } else {
+                    toolWindow?.show()
+                }
+            }
         } catch (e: Exception) {
             LOG.warn("Failed to focus agent terminal", e)
         }
@@ -149,12 +259,19 @@ class AgentManager(
         // re-adopts the session as a new agent instead of being ignored.
         if (agent != null) {
             knownJsonlFiles.remove(agent.jsonlFile)
+            // Release manifest claim so a peer instance can take over if it
+            // wants to (e.g. user closed this agent here, then resumed work
+            // from another IntelliJ window).
+            instanceManifest.unregisterSession(agent.jsonlFile)
         }
         persistAgents()
     }
 
     fun persistAgents() {
-        val persisted = agents.values.map { agent ->
+        // External (unified-view) agents are transient peer sessions — never
+        // persist them. restoreAgents also drops any legacy isExternal entry,
+        // but excluding them here keeps the stored set clean.
+        val persisted = agents.values.filter { !it.isExternal }.map { agent ->
             PersistedAgent(
                 id = agent.id,
                 terminalName = agent.terminalName,
@@ -165,8 +282,12 @@ class AgentManager(
                         parentToolId = it.parentToolId,
                         subagentId = it.subagentId,
                         jsonlFile = it.jsonlFile,
+                        taskStatus = it.taskStatus,
                     )
                 },
+                isExternal = agent.isExternal,
+                isAdopted = agent.isAdopted,
+                worktreeBranch = agent.worktreeBranch,
             )
         }
         settings.persistedAgents = gson.toJson(persisted)
@@ -190,11 +311,22 @@ class AgentManager(
         var restoredProjectDir: String? = null
 
         for (p in persisted) {
+            // Per-window independence: external (adopted) agents are no
+            // longer supported. Any persisted entry flagged isExternal is a
+            // leftover from the old adoption logic — drop it so this window
+            // only restores agents it actually launched itself.
+            if (p.isExternal) {
+                LOG.info("restoreAgents: dropping legacy external agent ${p.id} (${File(p.jsonlFile).name})")
+                continue
+            }
             val agent = AgentState(
                 id = p.id,
                 terminalName = p.terminalName,
                 projectDir = p.projectDir,
                 jsonlFile = p.jsonlFile,
+                isExternal = p.isExternal,
+                isAdopted = p.isAdopted,
+                worktreeBranch = p.worktreeBranch,
             )
 
             // Skip to end of file for restored agents
@@ -214,6 +346,7 @@ class AgentManager(
                     parentToolId = ps.parentToolId,
                     subagentId = ps.subagentId,
                     jsonlFile = ps.jsonlFile,
+                    taskStatus = ps.taskStatus,
                     fileOffset = if (subFile.exists()) subFile.length() else 0L,
                 )
                 agent.asyncSubagents[ps.parentToolId] = sub
@@ -222,6 +355,12 @@ class AgentManager(
 
             agents[p.id] = agent
             knownJsonlFiles.add(p.jsonlFile)
+            // Re-claim ownership in the manifest. Adopted (external) agents
+            // are excluded — they were never ours to begin with, and re-
+            // claiming them would defeat isolation across IDE restarts.
+            if (!agent.isExternal) {
+                instanceManifest.registerSession(p.jsonlFile)
+            }
 
             if (p.id > maxId) maxId = p.id
             val match = Regex("#(\\d+)$").find(p.terminalName)
@@ -254,9 +393,26 @@ class AgentManager(
             }
         } else emptyMap<String, Any?>()
 
+        // Surface which restored agents are external so the webview can render
+        // them faded immediately on reload (rather than waiting for the next
+        // adoption event, which would be too late for restored sessions).
+        val externalIds = agents.values.filter { it.isExternal }.map { it.id }.sorted()
+        // Per-agent display names — empty for adopted agents (so the webview
+        // falls back to `main ${id}` instead of the synthetic "Claude Code #N"
+        // label the user never sees in their IDE).
+        val displayNames = agents.values.associate { agent ->
+            agent.id.toString() to (if (agent.isAdopted) "" else agent.terminalName)
+        }
+        // Branch labels for restored worktree agents, so the badge survives reload.
+        val worktreeBranches = agents.values
+            .filter { it.worktreeBranch != null }
+            .associate { it.id.toString() to it.worktreeBranch }
         sendToWebview("existingAgents", mapOf(
             "agents" to agentIds,
             "agentMeta" to agentMeta,
+            "externalIds" to externalIds,
+            "displayNames" to displayNames,
+            "worktreeBranches" to worktreeBranches,
         ))
         sendCurrentAgentStatuses()
     }
@@ -268,17 +424,50 @@ class AgentManager(
                     "id" to agentId, "toolId" to toolId, "status" to status
                 ))
             }
+            // Replay sub-agent characters for any async sub-agent whose parent
+            // Task entry has already been removed from activeToolStatuses (the
+            // parent received tool_result but the sub is still running on its
+            // own JSONL). Without this, sub-agent characters disappear on
+            // webview reload until the next sub-agent activity.
+            for ((parentToolId, sub) in agent.asyncSubagents) {
+                if (parentToolId in agent.activeToolStatuses) continue  // already replayed above
+                if (sub.taskStatus.isEmpty()) continue                   // nothing to label with
+                sendToWebview("agentToolStart", mapOf(
+                    "id" to agentId, "toolId" to parentToolId, "status" to sub.taskStatus
+                ))
+            }
             if (agent.isWaiting) {
                 sendToWebview("agentStatus", mapOf(
                     "id" to agentId, "status" to "waiting"
                 ))
+            }
+            // Replay last context-window usage, model, and cumulative tokens so
+            // the HP gauge / model chip / session-total tooltip are all correct
+            // immediately after webview reload (no need to wait for the next
+            // assistant record).
+            val cumulativeAny = agent.cumulativeInput + agent.cumulativeCacheCreate +
+                agent.cumulativeCacheRead + agent.cumulativeOutput > 0L
+            if (agent.lastContextTokens > 0L || agent.lastModel.isNotEmpty() || cumulativeAny) {
+                val payload = mutableMapOf<String, Any?>("id" to agentId)
+                if (agent.lastContextTokens > 0L) payload["contextTokens"] = agent.lastContextTokens
+                if (agent.lastModel.isNotEmpty()) payload["model"] = agent.lastModel
+                if (cumulativeAny) {
+                    payload["cumulativeInput"] = agent.cumulativeInput
+                    payload["cumulativeCacheCreate"] = agent.cumulativeCacheCreate
+                    payload["cumulativeCacheRead"] = agent.cumulativeCacheRead
+                    payload["cumulativeOutput"] = agent.cumulativeOutput
+                }
+                sendToWebview("agentUsage", payload)
             }
         }
     }
 
     /** Remove agent when its terminal is closed/terminated */
     fun onTerminalClosed(terminalName: String) {
-        val agent = agents.values.find { it.terminalName == terminalName } ?: return
+        // External agents have no IDE terminal; their synthetic terminalName
+        // never appears in the terminal tab list, but guard defensively so a
+        // name collision can never despawn a peer session here.
+        val agent = agents.values.find { it.terminalName == terminalName && !it.isExternal } ?: return
         LOG.info("Terminal closed, removing agent ${agent.id}: $terminalName")
         closeAgent(agent.id)
     }
@@ -305,54 +494,52 @@ class AgentManager(
         if (agents.isEmpty()) return
 
         val now = System.currentTimeMillis()
-        val candidates = mutableListOf<Int>()
+        // Capture the path used for the staleness decision so we can re-verify
+        // it right before removal. This protects against a /clear reassignment
+        // racing the check: reassignAgentToFile may swap agent.jsonlFile mid-loop,
+        // and we must not remove an agent based on the OLD file's mtime once it
+        // points at a new (just-created, not-yet-stale) session.
+        val candidates = mutableListOf<Pair<Int, String>>()
 
         for ((id, agent) in agents) {
             // Skip agents whose async sub-agents are still running in background —
             // those have their own JSONLs and will survive even when the parent
             // file is quiet.
             if (agent.asyncSubagents.isNotEmpty()) continue
-            // Skip agents currently waiting on user permission (user is mid-interaction)
-            if (agent.permissionSent) continue
 
-            val file = File(agent.jsonlFile)
+            // Skip agents with a background Bash (run_in_background) still
+            // outstanding — BEHAVIOR_SPEC §2 says they stay active even when
+            // the JSONL is quiet (a silent long-running shell writes nothing).
+            // The exemption is released by the tool_result, or cleared by
+            // clearAgentActivity on the next user prompt / /clear, so it
+            // can't strand an agent forever.
+            if (agent.backgroundToolIds.isNotEmpty()) continue
+
+            val capturedPath = agent.jsonlFile
+            val file = File(capturedPath)
             if (!file.exists()) continue
 
             val staleDuration = now - file.lastModified()
             if (staleDuration < Constants.SESSION_STALE_THRESHOLD_MS) continue
 
-            // NOTE: activeToolIds / activeSubagentToolIds / isWaiting are
-            // intentionally NOT used as skip conditions. A Ctrl+C'd Claude CLI
-            // leaves those flags dangling forever because the interrupted turn
-            // never writes turn_duration to JSONL. The lastModified-based
-            // threshold above is the authoritative "alive" signal.
-            candidates.add(id)
+            // No skips for permissionSent / activeToolIds / isWaiting — these
+            // flags get stuck forever when Claude is Ctrl+C'd or killed mid-turn.
+            // JSONL lastModified is the authoritative "still working" signal.
+            // If the user genuinely takes >60s to respond to a permission prompt,
+            // the character disappears and re-adopts on the next JSONL write.
+            candidates.add(id to capturedPath)
         }
 
         if (candidates.isEmpty()) return
 
-        for (id in candidates) {
+        for ((id, capturedPath) in candidates) {
+            // Re-verify the agent still points at the same JSONL we judged stale.
+            // If reassignAgentToFile swapped jsonlFile in the meantime, skip —
+            // the new path may have fresh activity that the next tick will see.
+            val agent = agents[id] ?: continue
+            if (agent.jsonlFile != capturedPath) continue
             LOG.info("JSONL stale for ${Constants.SESSION_STALE_THRESHOLD_MS / 1000}s, removing agent $id")
             closeAgent(id)
-        }
-    }
-
-    /** Check if any Claude CLI process is currently running on the system */
-    private fun isAnyClaudeRunning(): Boolean {
-        return try {
-            // Match the claude executable in any process's command line
-            val proc = ProcessBuilder("pgrep", "-f", "[c]laude")
-                .redirectErrorStream(true)
-                .start()
-            proc.inputStream.readBytes()
-            val finished = proc.waitFor(5, TimeUnit.SECONDS)
-            if (!finished) {
-                proc.destroyForcibly()
-                return true // Timeout → assume alive (safe default)
-            }
-            proc.exitValue() == 0
-        } catch (_: Exception) {
-            true // Can't check → assume alive
         }
     }
 

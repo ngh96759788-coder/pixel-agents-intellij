@@ -72,6 +72,15 @@ export function layoutToFurnitureInstances(furniture: PlacedFurniture[]): Furnit
       }
     }
 
+    // Explicit per-item z-order override from the catalog (zSortBoost).
+    // Applied last so it wins over the chair / wall / surface special-cases
+    // above. Useful for panels the character should appear to be operating
+    // (positive boost = pull in front of the character) or for fixtures that
+    // belong behind everything regardless of row (negative boost).
+    if (entry.zSortBoost) {
+      zY += entry.zSortBoost
+    }
+
     // Colorize sprite if this furniture has a color override
     let sprite = entry.sprite
     if (item.color) {
@@ -134,7 +143,15 @@ function orientationToFacing(orientation: string): Direction {
 }
 
 /** Generate seats from chair furniture.
- *  Facing priority: 1) chair orientation, 2) adjacent desk, 3) forward (DOWN). */
+ *  Facing priority (revised after UFO-theme bug report): a chair next to a desk
+ *  almost always wants the character to face that desk regardless of the
+ *  chair's own catalog orientation. Authors place chairs *for* desks, not the
+ *  other way around. So we now check:
+ *   1. Adjacent desk direction (UP/DOWN/LEFT/RIGHT — the most natural intent)
+ *   2. Chair orientation (for standalone chairs facing TVs / lounges / etc.)
+ *   3. Sibling tiles in the same multi-tile chair (a 2×2 chair's "back" tile
+ *      with no adjacent desk inherits from the front tile's resolved facing)
+ *   4. Forward (DOWN) as the last resort */
 export function layoutToSeats(furniture: PlacedFurniture[]): Map<string, Seat> {
   const seats = new Map<string, Seat>()
 
@@ -163,39 +180,63 @@ export function layoutToSeats(furniture: PlacedFurniture[]): Map<string, Seat> {
     const entry = getCatalogEntry(item.type)
     if (!entry || entry.category !== 'chairs') continue
 
-    let seatCount = 0
+    // Per-instance override — set on the PlacedFurniture itself in the saved
+    // layout. Wins over adjacent-desk and orientation so authors can dictate
+    // the work motion (front/side/back) without rearranging the actual
+    // furniture footprints.
+    const overrideFacing = item.facing
+      ? orientationToFacing(item.facing)
+      : null
+
+    // Pass 1: per-tile resolution — explicit override → adjacent desk → chair orientation.
+    const tileFacing: Array<{ tileCol: number; tileRow: number; facing: Direction | null }> = []
     for (let dr = 0; dr < entry.footprintH; dr++) {
       for (let dc = 0; dc < entry.footprintW; dc++) {
         const tileCol = item.col + dc
         const tileRow = item.row + dr
-
-        // Determine facing direction:
-        // 1) Chair orientation takes priority
-        // 2) Adjacent desk direction
-        // 3) Default forward (DOWN)
-        let facingDir: Direction = Direction.DOWN
-        if (entry.orientation) {
-          facingDir = orientationToFacing(entry.orientation)
-        } else {
+        let facing: Direction | null = overrideFacing
+        if (facing === null) {
           for (const d of dirs) {
             if (deskTiles.has(`${tileCol + d.dc},${tileRow + d.dr}`)) {
-              facingDir = d.facing
+              facing = d.facing
               break
             }
           }
         }
-
-        // First seat uses chair uid (backward compat), subsequent use uid:N
-        const seatUid = seatCount === 0 ? item.uid : `${item.uid}:${seatCount}`
-        seats.set(seatUid, {
-          uid: seatUid,
-          seatCol: tileCol,
-          seatRow: tileRow,
-          facingDir,
-          assigned: false,
-        })
-        seatCount++
+        if (facing === null && entry.orientation) {
+          facing = orientationToFacing(entry.orientation)
+        }
+        tileFacing.push({ tileCol, tileRow, facing })
       }
+    }
+
+    // Pass 2: any tile that still has no facing (multi-tile chair "back" tiles
+    // with no adjacent desk and no orientation set) inherits from sibling
+    // tiles. Use the most common resolved facing across the chair so a 2×2
+    // commander chair places all seats consistently.
+    const counts = new Map<Direction, number>()
+    for (const t of tileFacing) {
+      if (t.facing !== null) counts.set(t.facing, (counts.get(t.facing) ?? 0) + 1)
+    }
+    let inherited: Direction = Direction.DOWN
+    let topCount = 0
+    for (const [k, v] of counts) {
+      if (v > topCount) { topCount = v; inherited = k }
+    }
+
+    let seatCount = 0
+    for (const t of tileFacing) {
+      const facingDir = t.facing ?? inherited
+      // First seat uses chair uid (backward compat), subsequent use uid:N
+      const seatUid = seatCount === 0 ? item.uid : `${item.uid}:${seatCount}`
+      seats.set(seatUid, {
+        uid: seatUid,
+        seatCol: t.tileCol,
+        seatRow: t.tileRow,
+        facingDir,
+        assigned: false,
+      })
+      seatCount++
     }
   }
 

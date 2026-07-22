@@ -67,6 +67,9 @@ export const CHARACTER_Z_SORT_OFFSET = 0.5
 export const OUTLINE_Z_SORT_OFFSET = 0.001
 export const SELECTED_OUTLINE_ALPHA = 1.0
 export const HOVERED_OUTLINE_ALPHA = 0.5
+/** Opacity for external-source characters in unified view (BEHAVIOR_SPEC §4:
+ *  "외부 출처 캐릭터는 투명도 85%로 구분 표시"). */
+export const EXTERNAL_AGENT_ALPHA = 0.85
 export const GHOST_PREVIEW_SPRITE_ALPHA = 0.5
 export const GHOST_PREVIEW_TINT_ALPHA = 0.25
 export const SELECTION_DASH_PATTERN: [number, number] = [4, 3]
@@ -164,4 +167,22 @@ export const CHARACTER_HIT_HALF_WIDTH = 8
 export const CHARACTER_HIT_HEIGHT = 24
 export const TOOL_OVERLAY_VERTICAL_OFFSET = 32
 export const PULSE_ANIMATION_DURATION_SEC = 1.5
+
+// ── Spinner Verb (ambient whimsical activity label) ──────────
+// The ambient overlay above a working character normally shows its REAL
+// activity (tool name / summary). Intermittently it flashes a whimsical
+// "thinking" bubble with a gerund instead, then reverts. Purely
+// cosmetic — NOT lifecycle/HUD thresholds, so not governed by
+// BEHAVIOR_SPEC.
+//
+//  • CYCLE     — how often the thinking flash recurs while working
+//  • FLASH     — how long each flash stays up (must be < CYCLE)
+//  • PHASE_STEP — per-character offset so concurrent agents don't all
+//                 flash in unison
+export const SPINNER_FLASH_CYCLE_MS = 7000
+export const SPINNER_FLASH_DURATION_MS = 1800
+export const SPINNER_FLASH_PHASE_STEP_MS = 1300
+// Max characters of real activity text shown in the ambient chip before
+// it's clipped with an ellipsis (long Bash command lines, etc.).
+export const AMBIENT_LABEL_MAX_LEN = 28
 

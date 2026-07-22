@@ -1,6 +1,13 @@
 import { useState } from 'react'
 import { SettingsModal } from './SettingsModal.js'
 
+interface OverlayDefaultsView {
+  identityDot: boolean
+  tokenBar: boolean
+  status: boolean
+  tether: boolean
+}
+
 interface BottomToolbarProps {
   isEditMode: boolean
   onOpenClaude: () => void
@@ -8,6 +15,15 @@ interface BottomToolbarProps {
   isDebugMode: boolean
   onToggleDebugMode: () => void
   currentTheme: string
+  overlayDefaults: OverlayDefaultsView
+  onOverlayDefaultChange: (kind: keyof OverlayDefaultsView, enabled: boolean) => void
+  sharedLayoutAcrossProjects: boolean
+  onToggleSharedLayout: (enabled: boolean) => void
+  unifiedView: boolean
+  onToggleUnifiedView: (enabled: boolean) => void
+  /** True when running inside the MCP bridge widget. Hides IDE-only
+   *  affordances (+ Agent) that can't be wired to Claude Desktop. */
+  bridgeMode?: boolean
 }
 
 const panelStyle: React.CSSProperties = {
@@ -49,29 +65,38 @@ export function BottomToolbar({
   isDebugMode,
   onToggleDebugMode,
   currentTheme,
+  overlayDefaults,
+  onOverlayDefaultChange,
+  sharedLayoutAcrossProjects,
+  onToggleSharedLayout,
+  unifiedView,
+  onToggleUnifiedView,
+  bridgeMode,
 }: BottomToolbarProps) {
   const [hovered, setHovered] = useState<string | null>(null)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
   return (
     <div style={panelStyle}>
-      <button
-        onClick={onOpenClaude}
-        onMouseEnter={() => setHovered('agent')}
-        onMouseLeave={() => setHovered(null)}
-        style={{
-          ...btnBase,
-          padding: '5px 12px',
-          background:
-            hovered === 'agent'
-              ? 'var(--pixel-agent-hover-bg)'
-              : 'var(--pixel-agent-bg)',
-          border: '2px solid var(--pixel-agent-border)',
-          color: 'var(--pixel-agent-text)',
-        }}
-      >
-        + Agent
-      </button>
+      {!bridgeMode && (
+        <button
+          onClick={onOpenClaude}
+          onMouseEnter={() => setHovered('agent')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            ...btnBase,
+            padding: '5px 12px',
+            background:
+              hovered === 'agent'
+                ? 'var(--pixel-agent-hover-bg)'
+                : 'var(--pixel-agent-bg)',
+            border: '2px solid var(--pixel-agent-border)',
+            color: 'var(--pixel-agent-text)',
+          }}
+        >
+          + Agent
+        </button>
+      )}
       <button
         onClick={onToggleEditMode}
         onMouseEnter={() => setHovered('edit')}
@@ -111,6 +136,12 @@ export function BottomToolbar({
           isDebugMode={isDebugMode}
           onToggleDebugMode={onToggleDebugMode}
           currentTheme={currentTheme}
+          overlayDefaults={overlayDefaults}
+          onOverlayDefaultChange={onOverlayDefaultChange}
+          sharedLayoutAcrossProjects={sharedLayoutAcrossProjects}
+          onToggleSharedLayout={onToggleSharedLayout}
+          unifiedView={unifiedView}
+          onToggleUnifiedView={onToggleUnifiedView}
         />
       </div>
     </div>

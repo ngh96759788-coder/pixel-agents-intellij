@@ -27,10 +27,50 @@ data class AgentState(
      * are created under <sessionId>/subagents/.
      */
     val pendingSubagentIds: ConcurrentLinkedDeque<String> = ConcurrentLinkedDeque(),
+    /**
+     * tool_use ids of Bash tools launched with `run_in_background: true` whose
+     * tool_result hasn't arrived yet. BEHAVIOR_SPEC §2: while a background Bash
+     * is still running the character must stay active — these ids survive
+     * `turn_duration` clearing and suppress the waiting/idle transition and the
+     * stale-session despawn until the matching tool_result lands.
+     */
+    val backgroundToolIds: MutableSet<String> = ConcurrentHashMap.newKeySet(),
     @Volatile var subagentFolderWatched: Boolean = false,
     @Volatile var isWaiting: Boolean = false,
     @Volatile var permissionSent: Boolean = false,
     @Volatile var hadToolsInTurn: Boolean = false,
+    /** Last observed prompt-side context tokens (input + cache_creation + cache_read).
+     *  Updated whenever an assistant record carries a `message.usage` block. -1 = unknown. */
+    @Volatile var lastContextTokens: Long = -1L,
+    /** Last observed model id from `message.model` (e.g. "claude-opus-4-7"). Empty = unknown. */
+    @Volatile var lastModel: String = "",
+    /** Cumulative API throughput across all turns in this session.
+     *  Each field accumulates from `message.usage` on every assistant record:
+     *  - cumulativeInput / cacheCreate / cacheRead / output
+     *  These are NOT context window measurements — they're the total billable
+     *  throughput so far. Cost is estimated webview-side using model rates. */
+    @Volatile var cumulativeInput: Long = 0L,
+    @Volatile var cumulativeCacheCreate: Long = 0L,
+    @Volatile var cumulativeCacheRead: Long = 0L,
+    @Volatile var cumulativeOutput: Long = 0L,
+    /** True when this session was started outside this IDE instance (e.g. another
+     *  IntelliJ window or a CLI on the same project) and adopted via folder scan.
+     *  Used by the webview to render the character at reduced opacity with an
+     *  external badge so users can tell at a glance which work belongs to *this*
+     *  IDE versus shared peers. */
+    @Volatile var isExternal: Boolean = false,
+    /** True when this agent was discovered via JSONL adoption (user typed
+     *  `claude` directly in a terminal) rather than launched through the
+     *  + Agent button. The webview uses this to skip showing the synthetic
+     *  "Claude Code #N" name for adopted sessions — that internal label is
+     *  meaningless to the user, who only knows their real terminal tab
+     *  ("local", "local(2)", etc). Falls back to `main ${id}` in the UI. */
+    @Volatile var isAdopted: Boolean = false,
+    /** Git branch of the worktree this session runs in, when the session was
+     *  adopted from a worktree of the open repo (IntelliJ 2026.1 task hand-off).
+     *  null for the main worktree / non-worktree sessions. The webview shows it
+     *  as a "⑂branch" suffix so users can tell which branch each agent works on. */
+    @Volatile var worktreeBranch: String? = null,
 )
 
 /**
@@ -41,6 +81,11 @@ data class AsyncSubagent(
     val parentToolId: String,
     val subagentId: String,
     val jsonlFile: String,
+    /** The parent's "Subtask[type]: desc" status at bind time. Preserved so the
+     *  sub-agent character can be respawned with the correct label after a
+     *  webview reload, even if the parent's Task tool_result has already
+     *  arrived and removed activeToolStatuses[parentToolId]. */
+    val taskStatus: String = "",
     @Volatile var fileOffset: Long = 0,
     @Volatile var lineBuffer: String = "",
 )
@@ -51,10 +96,14 @@ data class PersistedAgent(
     val jsonlFile: String,
     val projectDir: String,
     val asyncSubagents: List<PersistedAsyncSubagent> = emptyList(),
+    val isExternal: Boolean = false,
+    val isAdopted: Boolean = false,
+    val worktreeBranch: String? = null,
 )
 
 data class PersistedAsyncSubagent(
     val parentToolId: String,
     val subagentId: String,
     val jsonlFile: String,
+    val taskStatus: String = "",
 )

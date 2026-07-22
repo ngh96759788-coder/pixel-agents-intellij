@@ -7,17 +7,36 @@ object Constants {
     const val SUBAGENT_FOLDER_POLL_INTERVAL_MS = 500L
     const val PROJECT_SCAN_INTERVAL_MS = 1000L
     const val TOOL_DONE_DELAY_MS = 300L
-    const val PERMISSION_TIMER_DELAY_MS = 7000L
+    /** Delay before a "needs approval" speech bubble pops on a non-exempt tool
+     *  that hasn't reported back. Originally 7s, bumped to 30s after the
+     *  sleep-10s false-positive: Bash with no stdout (sleep, polling waits)
+     *  emits no `bash_progress` records, so 7s of JSONL silence looked
+     *  indistinguishable from a real permission pause. 30s covers most short
+     *  blocking commands; genuine approval prompts remain visible after that. */
+    const val PERMISSION_TIMER_DELAY_MS = 30000L
     const val TEXT_IDLE_DELAY_MS = 5000L
     const val ADOPTION_MAX_AGE_MS = 10000L  // Only adopt JSONL files modified within last 10s
+    const val PROJECT_DISCOVERY_AGE_MS = 60_000L  // Discover claude project subdirs with JSONL activity within last 60s
+    const val PROJECT_DISCOVERY_INTERVAL_MS = 15_000L  // Re-run discovery every 15s to catch claude sessions spawned after IDE open
+    /** How often to re-enumerate git worktrees of the open repo. Worktrees can be
+     *  created at runtime when IntelliJ hands a task off to an agent (2026.1+), so
+     *  the office must pick them up without an IDE restart. Scoped to THIS repo only. */
+    const val WORKTREE_SCAN_INTERVAL_MS = 5_000L
 
     // Session alive check
     const val SESSION_CHECK_INTERVAL_MS = 10_000L  // Check every 10s
-    const val SESSION_STALE_THRESHOLD_MS = 60_000L // JSONL idle for 60s → remove agent
+    // Stale threshold for MAIN agents (BEHAVIOR_SPEC §2: main despawns after 60s
+    // of JSONL silence). If the JSONL hasn't moved for this long, remove the agent.
+    const val SESSION_STALE_THRESHOLD_MS = 60_000L
+    // Stale threshold for SUB-AGENT watchers (BEHAVIOR_SPEC §2: sub despawns after
+    // 30s). Applies to both "sub JSONL never appeared" and "sub JSONL stopped
+    // growing" give-up checks in FileWatcher.checkSubagentTimeout.
+    const val SUBAGENT_STALE_THRESHOLD_MS = 30_000L
 
-    // Async sub-agent watcher timeouts
-    const val SUBAGENT_JSONL_WAIT_TIMEOUT_MS = 30_000L   // Give up if file never appears
-    const val SUBAGENT_IDLE_TIMEOUT_MS = 120_000L        // Stop polling if no new data for 2m
+    // Rolling token-usage window for the global HUD (BEHAVIOR_SPEC §3:
+    // absolute tokens over a 5h window, refreshed every minute).
+    const val QUOTA_WINDOW_MS = 5 * 60 * 60 * 1000L
+    const val QUOTA_TICK_MS = 60_000L
 
     // Display truncation
     const val BASH_COMMAND_DISPLAY_MAX_LENGTH = 30

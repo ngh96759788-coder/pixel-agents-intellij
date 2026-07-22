@@ -79,6 +79,12 @@ export interface ToolActivity {
   status: string
   done: boolean
   permissionWait?: boolean
+  /** output_tokens of the assistant turn that emitted this tool_use, when available.
+   *  Approximates the model-side cost of *deciding to make this call* (not the tool's
+   *  return payload). Multiple tool_uses in one turn share this delta. */
+  outputTokens?: number
+  /** Date.now() when the tool started, used for elapsed-time display. */
+  startedAt?: number
 }
 
 export const FurnitureType = {
@@ -123,6 +129,11 @@ export interface FurnitureCatalogEntry {
   renderOffsetY?: number
   /** Whether this item can be placed on wall tiles */
   canPlaceOnWalls?: boolean
+  /** Optional z-sort offset added to the computed zY. Positive values push the
+   *  sprite IN FRONT of other entities at the same row (e.g. a panel that the
+   *  character should appear to be *operating* — character renders behind the
+   *  panel face). Negative values push it BEHIND (e.g. background fixtures). */
+  zSortBoost?: number
   /** Whether this furniture auto-animates (periodic state toggle) */
   autoAnimate?: boolean
   /** Animation interval in seconds (default from constants) */
@@ -138,6 +149,12 @@ export interface PlacedFurniture {
   row: number
   /** Optional color override for furniture */
   color?: FloorColor
+  /** Optional explicit facing direction for chairs — overrides both the
+   *  adjacent-desk heuristic and the chair's catalog orientation. Use when
+   *  the visual you want disagrees with the auto-derived facing (e.g. a
+   *  character at a console who should face the camera even though the desk
+   *  sits north of them). One of 'up' | 'down' | 'left' | 'right'. */
+  facing?: string
 }
 
 export interface OfficeLayout {
@@ -193,6 +210,10 @@ export interface Character {
   seatTimer: number
   /** Whether this character represents a sub-agent (spawned by Task tool) */
   isSubagent: boolean
+  /** True for sessions adopted from disk (started outside this IDE — e.g. another
+   *  IntelliJ window on the same project). Renderer fades the sprite, ToolOverlay
+   *  draws a corner badge. */
+  isExternal: boolean
   /** Whether this sub-agent has completed its work (Task tool returned result) */
   isCompleted: boolean
   /** Parent agent ID if this is a sub-agent, null otherwise */
@@ -205,4 +226,18 @@ export interface Character {
   matrixEffectTimer: number
   /** Per-column random seeds (16 values) for staggered rain timing */
   matrixEffectSeeds: number[]
+  /** Last reported prompt-side context token count (input + cache_create +
+   *  cache_read). Drives the always-on HP bar above the character. -1 means
+   *  no data yet → bar is hidden. Sub-agents inherit zero since their tokens
+   *  are not separately tracked. */
+  contextTokens: number
+  /** performance.now() timestamp of the last contextTokens update. The HP-bar
+   *  fades out after a short quiet period so an idle character isn't perma-
+   *  stamped with a stale value. 0 = never updated. */
+  contextTokensUpdatedAt: number
+  /** Last reported model id (e.g. "claude-opus-4-7"). Drives the HP-bar
+   *  scale via `contextWindowFor()` — Opus 4.x uses a 1M window, others
+   *  default to 200K. Undefined when no usage event has resolved the
+   *  model yet (bar falls back to 200K cap). */
+  model?: string
 }

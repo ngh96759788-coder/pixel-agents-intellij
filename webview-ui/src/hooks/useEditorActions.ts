@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import type { OfficeState } from '../office/engine/officeState.js'
 import type { EditorState } from '../office/editor/editorState.js'
 import { EditTool, TILE_SIZE } from '../office/types.js'
@@ -327,6 +327,36 @@ export function useEditorActions(
 
   const handleZoomChange = useCallback((newZoom: number) => {
     setZoom(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom)))
+  }, [])
+
+  // Global zoom keyboard shortcuts. Works regardless of edit mode. Plain +/- and
+  // Ctrl/Cmd-modifier variants are both accepted; "0" resets to the auto-fit
+  // default (same value layoutLoaded picks).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Skip when typing into a real input (e.g. import/export filename, settings)
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName?.toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return
+
+      // Accept "+", "-", "=" (since shift+= is +), and the numpad equivalents.
+      const isZoomIn = e.key === '+' || e.key === '=' || (e.key === '+' && e.ctrlKey)
+      const isZoomOut = e.key === '-' || e.key === '_'
+      const isZoomReset = e.key === '0' && (e.ctrlKey || e.metaKey)
+
+      if (isZoomIn) {
+        e.preventDefault()
+        setZoom((z) => Math.min(ZOOM_MAX, z + 1))
+      } else if (isZoomOut) {
+        e.preventDefault()
+        setZoom((z) => Math.max(ZOOM_MIN, z - 1))
+      } else if (isZoomReset) {
+        e.preventDefault()
+        setZoom(defaultZoom())
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
   }, [])
 
   const handleDragMove = useCallback((uid: string, newCol: number, newRow: number) => {

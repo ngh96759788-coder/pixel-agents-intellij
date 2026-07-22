@@ -1,6 +1,7 @@
 import { FurnitureType } from '../types.js'
 import type { FurnitureCatalogEntry, SpriteData } from '../types.js'
 import { AUTO_ANIMATE_INTERVAL_SEC } from '../../constants.js'
+import { debug } from '../../debug.js'
 import {
   DESK_SQUARE_SPRITE,
   BOOKSHELF_SPRITE,
@@ -32,6 +33,7 @@ export interface LoadedAssetData {
     autoAnimate?: boolean
     animIntervalSec?: number
     animSequence?: string[]
+    zSortBoost?: number
   }>
   sprites: Record<string, SpriteData>
 }
@@ -113,6 +115,8 @@ export function buildDynamicCatalog(assets: LoadedAssetData): boolean {
       ...(asset.autoAnimate ? { autoAnimate: true } : {}),
       ...(asset.animIntervalSec ? { animIntervalSec: asset.animIntervalSec } : {}),
       ...(asset.animSequence ? { animSequence: asset.animSequence } : {}),
+      ...(typeof asset.zSortBoost === 'number' && asset.zSortBoost !== 0
+        ? { zSortBoost: asset.zSortBoost } : {}),
     }
   }).filter((e): e is CatalogEntryWithCategory => e !== null)
 
@@ -240,7 +244,7 @@ export function buildDynamicCatalog(assets: LoadedAssetData): boolean {
     .sort()
 
   const rotGroupCount = new Set(Array.from(rotationGroups.values())).size
-  console.log(`✓ Built dynamic catalog with ${allEntries.length} assets (${visibleEntries.length} visible, ${rotGroupCount} rotation groups, ${stateGroups.size / 2} state pairs)`)
+  debug(`✓ Built dynamic catalog with ${allEntries.length} assets (${visibleEntries.length} visible, ${rotGroupCount} rotation groups, ${stateGroups.size / 2} state pairs)`)
   return true
 }
 

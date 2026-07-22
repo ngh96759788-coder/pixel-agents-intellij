@@ -48,6 +48,47 @@
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>1.0.3</h3>
+<p><b>UX</b></p>
+<ul>
+  <li>Status bubble stays above every working agent (toned-down ambient style; full styling on hover/select)</li>
+  <li>Context window HP gauge next to each agent's label &mdash; muted forest-green / gold / brick-red bar shows 200K context usage; % number appears on hover/select</li>
+  <li>Model indicator chip in the activity bubble (<code>OPUS</code> / <code>SON</code> / <code>HAI</code>) &mdash; pixel-art styling with muted palette + 1px outline + hard offset shadow. Reads <code>message.model</code> from each assistant record</li>
+  <li>Session totals on hover/select &mdash; cumulative tokens + estimated USD cost line below the bubble (e.g. <code>12.4K tok &bull; $0.18 est</code>). Cost is approximate, based on the last observed model's published rates with cache_create at 1.25x input and cache_read at 0.10x</li>
+  <li>Keyboard zoom shortcuts &mdash; <code>+</code> / <code>-</code> step zoom; <code>Ctrl/Cmd+0</code> resets to auto-fit default. Ignored while typing in inputs</li>
+  <li>Unified all agent stale-removal thresholds to 60 seconds (previously 30 / 60 / 120)</li>
+</ul>
+<p><b>Stability &mdash; agent lifecycle</b></p>
+<ul>
+  <li>Fixed main agent not disappearing after 60s when Claude was Ctrl+C'd mid-permission-prompt (<code>permissionSent</code> stuck flag bypassed dead-session check)</li>
+  <li>Fixed race where clicking <i>+ Agent</i> could spawn duplicate characters (<code>knownJsonlFiles</code> registered before <code>claude</code> launch)</li>
+  <li>Fixed sub-agent characters disappearing on webview reload while Task was still running (<code>taskStatus</code> preserved on <code>AsyncSubagent</code>)</li>
+  <li>Fixed <code>/clear</code> leaving <code>pendingSubagentIds</code> / <code>hadToolsInTurn</code> stuck, causing mis-bound sub-agents and missing waiting indicators</li>
+  <li>Fixed stale <code>agentSeats</code> entries leaking across IDE restarts and causing seat/palette drift on new agents</li>
+  <li>Reconciliation: <code>existingAgents</code> message now removes ghost characters/state the webview has but the extension does not</li>
+  <li>TOCTOU guard: dead-session check re-verifies <code>jsonlFile</code> path before removing an agent that may have just been reassigned via <code>/clear</code></li>
+  <li>Fixed <code>startJsonlPoll</code> using a captured stale <code>agent</code> reference; now re-fetches live state every tick</li>
+</ul>
+<p><b>Stability &mdash; webview</b></p>
+<ul>
+  <li>Guarded <code>addSubagent</code> capacity sentinel (returns 0) so phantom sub-agent records are not pushed when the visible-character cap is reached</li>
+  <li>Sub-agent characters now stop their typing/reading animation when their last tool finishes</li>
+  <li><code>subagentClear</code> now also removes the corresponding React record so labels don't outlive the OfficeState character</li>
+</ul>
+<p><b>Resource leaks</b></p>
+<ul>
+  <li>Made <code>onWebviewReady</code> infrastructure init idempotent &mdash; JCEF panel toggles no longer accumulate duplicate <code>TerminalDetector</code> / sessionAliveCheck / periodicDiscovery timers</li>
+  <li><code>stopWatching</code> now also clears <code>subagentStartTimes</code> / <code>subagentLastActivity</code> bookkeeping (prevents long-session memory growth)</li>
+</ul>
+<p><b>API &amp; build</b></p>
+<ul>
+  <li>Replaced scheduled-for-removal <code>TerminalToolWindowManager.createLocalShellWidget</code> with <code>createShellWidget</code> for forward compatibility with future IntelliJ releases</li>
+  <li>Cleared Kotlin compiler warnings (shadowed name, unused parameter)</li>
+  <li>Migrated extension <code>println</code> calls (35 sites) and webview <code>console.log</code> calls (14 sites) to proper <code>Logger.debug</code> / <code>debug()</code> gates &mdash; silent in production</li>
+  <li>Marked shared <code>assetsDir</code> as <code>@Volatile</code> to harden visibility between <code>setTheme</code> and asset loading threads</li>
+  <li>Added unit-test infrastructure: JUnit 5 (Kotlin) + vitest (webview), 60 tests covering pure helpers; CI workflow runs both on push/PR with plugin verifier on main</li>
+</ul>
+
 <h3>1.0.0</h3>
 <ul>
   <li>Initial release &mdash; IntelliJ Platform port of Pixel Agents</li>
@@ -75,6 +116,8 @@
                     icon="/icons/pixelAgents.svg"/>
         <projectService
             serviceImplementation="com.pixelagents.intellij.PixelAgentsSettings"/>
+        <applicationService
+            serviceImplementation="com.pixelagents.intellij.PixelAgentsAppSettings"/>
         <notificationGroup id="Pixel Agents"
                            displayType="BALLOON"/>
     </extensions>

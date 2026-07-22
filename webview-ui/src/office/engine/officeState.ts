@@ -1,5 +1,6 @@
 import { TILE_SIZE, MATRIX_EFFECT_DURATION, CharacterState, Direction } from '../types.js'
 import { getLoadedPaletteCount } from '../sprites/spriteData.js'
+import { debug } from '../../debug.js'
 import {
   HUE_SHIFT_MIN_DEG,
   HUE_SHIFT_RANGE_DEG,
@@ -61,14 +62,14 @@ export class OfficeState {
   /** Rebuild all derived state from a new layout. Reassigns existing characters.
    *  @param shift Optional pixel shift to apply when grid expands left/up */
   rebuildFromLayout(layout: OfficeLayout, shift?: { col: number; row: number }): void {
-    console.log(`[OfficeState.rebuildFromLayout] cols=${layout.cols} rows=${layout.rows} furniture=${layout.furniture.length}`)
+    debug(`[OfficeState.rebuildFromLayout] cols=${layout.cols} rows=${layout.rows} furniture=${layout.furniture.length}`)
     this.layout = layout
     this.tileMap = layoutToTileMap(layout)
     this.seats = layoutToSeats(layout.furniture)
     this.blockedTiles = getBlockedTiles(layout.furniture)
     this.rebuildFurnitureInstances()
     this.walkableTiles = getWalkableTiles(this.tileMap, this.blockedTiles)
-    console.log(`[OfficeState.rebuildFromLayout] blockedTiles=${this.blockedTiles.size} walkableTiles=${this.walkableTiles.length} seats=${this.seats.size}`)
+    debug(`[OfficeState.rebuildFromLayout] blockedTiles=${this.blockedTiles.size} walkableTiles=${this.walkableTiles.length} seats=${this.seats.size}`)
 
     // Shift character positions when grid expands left/up
     if (shift && (shift.col !== 0 || shift.row !== 0)) {
@@ -608,6 +609,34 @@ export class OfficeState {
   /** Look up the sub-agent character ID for a given parent+toolId, or null */
   getSubagentId(parentAgentId: number, parentToolId: string): number | null {
     return this.subagentIdMap.get(`${parentAgentId}:${parentToolId}`) ?? null
+  }
+
+  /** Mark a character as external (started outside this IDE). Renderer + overlay
+   *  read this to fade the sprite and stamp a corner badge so users can tell
+   *  shared / cross-IDE sessions apart from their own work. */
+  setAgentExternal(id: number, isExternal: boolean): void {
+    const ch = this.characters.get(id)
+    if (ch) ch.isExternal = isExternal
+  }
+
+  /** Update the always-visible HP-style context token bar shown above the
+   *  character. Called whenever the extension emits a fresh agentUsage.
+   *  Also stamps the update time so the renderer can fade the bar after a
+   *  quiet period (avoids a stale frozen value lingering forever). */
+  setAgentContextTokens(id: number, tokens: number): void {
+    const ch = this.characters.get(id)
+    if (ch) {
+      ch.contextTokens = tokens
+      ch.contextTokensUpdatedAt = performance.now()
+    }
+  }
+
+  /** Stamp the resolved model id on a character so the HP-bar renderer
+   *  can scale to the correct context window (Opus 4.x = 1M, others =
+   *  200K) instead of the legacy hardcoded 200K. Idempotent. */
+  setAgentModel(id: number, model: string): void {
+    const ch = this.characters.get(id)
+    if (ch && ch.model !== model) ch.model = model
   }
 
   setAgentActive(id: number, active: boolean): void {

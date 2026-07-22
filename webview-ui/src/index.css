@@ -8,11 +8,16 @@
 
 :root {
   --pixel-bg: #1a1a2a;
+  /* Darker inset shade for sub-panels / thumbnails nested inside a
+     --pixel-bg panel (editor toolbar palette wells, previews). */
+  --pixel-bg-inset: #181828;
   --pixel-border: #5a5a7a;
   --pixel-border-light: #7a7aaa;
   --pixel-accent: #5a8cff;
   --pixel-green: #5ac88c;
   --pixel-shadow: 2px 2px 0px #0a0a14;
+  /* Small hard shadow for inline badges/chips (HUD badges, model chips). */
+  --pixel-shadow-sm: 1px 1px 0px #0a0a14;
 
   /* Button base */
   --pixel-text: rgba(255, 255, 255, 0.95);
@@ -63,4 +68,51 @@ html, body, #root {
 
 * {
   font-family: 'FS Pixel Sans', sans-serif;
+}
+
+/* Pixel-styled native form controls (layout editor color sliders +
+   Colorize checkbox). Chromium-only webview (JCEF / Chrome --app), so
+   -webkit pseudo-elements are safe. Default OS chrome (rounded thumb,
+   glossy track, round checkbox) clashes with the sharp-corner pixel
+   aesthetic used by every hand-built control. */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 12px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 6px;
+  background: var(--pixel-bg-inset);
+  border: 1px solid var(--pixel-border);
+  border-radius: 0;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 12px;
+  margin-top: -4px; /* center on the 6px track */
+  background: var(--pixel-accent);
+  border: 1px solid var(--pixel-border-light);
+  border-radius: 0;
+  box-shadow: var(--pixel-shadow-sm);
+}
+
+input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  background: var(--pixel-bg-inset);
+  border: 1px solid var(--pixel-border);
+  border-radius: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+input[type='checkbox']:checked {
+  background: var(--pixel-accent);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.35);
 }

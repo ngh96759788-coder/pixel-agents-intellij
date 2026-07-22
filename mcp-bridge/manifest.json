@@ -1,0 +1,34 @@
+{
+  "manifest_version": "0.1",
+  "name": "pixel-agents-bridge",
+  "display_name": "Pixel Office Bridge",
+  "version": "0.8.6",
+  "description": "Surfaces Claude Desktop work as characters in a small pixel office widget. Activity is auto-detected from Claude's tool-call log — no announce / progress / finish calls required. The bridge picks parallel bursts apart into named sub-agent characters and removes them automatically when Claude goes quiet.",
+  "long_description": "When Claude calls office_open, the bridge boots a tiny localhost HTTP+WS server and launches the office viewer in your default browser. Agent activity is detected automatically from Claude's tool-call log — no extra MCP tool calls (and no extra tokens) are needed to spawn or update characters. The main agent reflects every tool Claude uses; bursts of 3+ tools within 3 seconds get visualised as sub-agent characters. Sub-agent characters despawn after 30 seconds of silence, main characters after 60 seconds (per BEHAVIOR_SPEC). The HUD shows the count of currently-active characters and a rolling 5-hour token-usage figure summed from ~/.claude/projects JSONL. office_status is an optional self-report helper for environments without JSONL ground truth; office_diagnose returns a one-shot snapshot of the bridge state for troubleshooting.",
+  "author": {
+    "name": "Pixel Agents",
+    "email": "hoon@aladin.co.kr"
+  },
+  "homepage": "https://github.com/pixel-agents/pixel-agents-intellij",
+  "license": "MIT",
+  "keywords": [
+    "pixel-art",
+    "visualization",
+    "office",
+    "intellij",
+    "claude-code"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.mjs"]
+    }
+  },
+  "tools": [
+    { "name": "office_open", "description": "Open the office viewer in the user's default browser" },
+    { "name": "office_status", "description": "Report your own context-window usage" }
+  ],
+  "user_config": {}
+}

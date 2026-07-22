@@ -2,6 +2,7 @@ package com.pixelagents.intellij
 
 import com.google.gson.Gson
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.fileChooser.FileChooserFactory
@@ -16,6 +17,10 @@ import java.util.concurrent.*
 
 class LayoutPersistence(projectBasePath: String?) : Disposable {
 
+    companion object {
+        private val LOG = Logger.getInstance(LayoutPersistence::class.java)
+    }
+
     private val gson = Gson()
     @Volatile
     private var skipNextChange = false
@@ -27,19 +32,37 @@ class LayoutPersistence(projectBasePath: String?) : Disposable {
     }
 
     /**
-     * Per-project scope directory so multiple IntelliJ windows (each opened
-     * on a different project) don't stomp on each other's layout / theme via
-     * the shared ~/.pixel-agents/layout.json file. Falls back to "default"
-     * when no base path is available.
+     * Project-scoped slug used when "share layout across projects" is OFF.
+     * Each IntelliJ window writes to its own dir (~/.pixel-agents/<slug>/…)
+     * so themes/layouts don't stomp each other.
      */
-    private val scopeDir: String =
+    private val projectScopeDir: String =
         projectBasePath?.replace(Regex("[:\\\\/]"), "-")?.ifBlank { null } ?: "default"
+
+    /** Constant scope dir used when "share layout across projects" is ON.
+     *  All windows read/write the same file so changes propagate. */
+    private val sharedScopeDir: String = "shared"
+
+    /**
+     * Resolves the active scope dir at call time. The watcher re-reads this
+     * every poll, so flipping [PixelAgentsAppSettings.sharedLayoutAcrossProjects]
+     * takes effect on the next tick without recreating this object —
+     * [refreshAfterScopeChange] just resets the mtime cursor so the new
+     * file's existing content registers as a fresh change.
+     */
+    private fun currentScopeDir(): String {
+        return if (PixelAgentsAppSettings.getInstance().sharedLayoutAcrossProjects) {
+            sharedScopeDir
+        } else {
+            projectScopeDir
+        }
+    }
 
     private fun getLayoutFilePath(): String {
         return Paths.get(
             System.getProperty("user.home"),
             Constants.LAYOUT_FILE_DIR,
-            scopeDir,
+            currentScopeDir(),
             Constants.LAYOUT_FILE_NAME
         ).toString()
     }
@@ -53,7 +76,7 @@ class LayoutPersistence(projectBasePath: String?) : Disposable {
                 gson.fromJson(file.readText(), Map::class.java) as? Map<String, Any?>
             }
         } catch (e: Exception) {
-            println("[Pixel Agents] Failed to read layout file: $e")
+            LOG.warn("Failed to read layout file", e)
             null
         }
     }
@@ -67,7 +90,7 @@ class LayoutPersistence(projectBasePath: String?) : Disposable {
             tmpFile.writeText(gson.toJson(layout))
             atomicReplace(tmpFile, file)
         } catch (e: Exception) {
-            println("[Pixel Agents] Failed to write layout file: $e")
+            LOG.warn("Failed to write layout file", e)
         }
     }
 
@@ -136,9 +159,22 @@ class LayoutPersistence(projectBasePath: String?) : Disposable {
         return Paths.get(
             System.getProperty("user.home"),
             Constants.LAYOUT_FILE_DIR,
-            scopeDir,
+            currentScopeDir(),
             layoutFileName
         ).toString()
+    }
+
+    /**
+     * Reset the mtime cursor so the watcher treats the new scope's file as
+     * a fresh change on the very next poll. Call this after flipping
+     * [PixelAgentsAppSettings.sharedLayoutAcrossProjects] so the UI picks
+     * up whatever layout the new scope already contains. ToolWindowFactory
+     * handles the additional concern of migrating the current layout into
+     * the new scope when it's empty.
+     */
+    fun refreshAfterScopeChange() {
+        lastMtime = 0L
+        skipNextChange = false
     }
 
     fun readThemeLayoutFromFile(layoutFileName: String): Map<String, Any?>? {
@@ -150,7 +186,7 @@ class LayoutPersistence(projectBasePath: String?) : Disposable {
                 gson.fromJson(file.readText(), Map::class.java) as? Map<String, Any?>
             }
         } catch (e: Exception) {
-            println("[Pixel Agents] Failed to read theme layout file: $e")
+            LOG.warn("Failed to read theme layout file", e)
             null
         }
     }
@@ -164,7 +200,7 @@ class LayoutPersistence(projectBasePath: String?) : Disposable {
             tmpFile.writeText(gson.toJson(layout))
             atomicReplace(tmpFile, file)
         } catch (e: Exception) {
-            println("[Pixel Agents] Failed to write theme layout file: $e")
+            LOG.warn("Failed to write theme layout file", e)
         }
     }
 
@@ -200,10 +236,10 @@ class LayoutPersistence(projectBasePath: String?) : Disposable {
                 @Suppress("UNCHECKED_CAST")
                 val layout = gson.fromJson(file.readText(), Map::class.java) as? Map<String, Any?>
                     ?: return@scheduleAtFixedRate
-                println("[Pixel Agents] External layout change detected")
+                LOG.info("External layout change detected")
                 onExternalChange(layout)
             } catch (e: Exception) {
-                println("[Pixel Agents] Error checking layout file: $e")
+                LOG.warn("Error checking layout file", e)
             }
         }, Constants.LAYOUT_FILE_POLL_INTERVAL_MS, Constants.LAYOUT_FILE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS)
     }

@@ -14,3 +14,12 @@ build/
 .gradle/
 .intellijPlatform/
 *.iml
+
+# Tooling / temp workspaces
+.tldr/
+_workspace/
+
+# mcp-bridge build outputs (regenerate via `npm run pack`)
+mcp-bridge/web/
+mcp-bridge/server/
+mcp-bridge/*.mcpb

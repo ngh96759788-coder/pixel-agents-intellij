@@ -134,6 +134,21 @@ npm run import-tileset
 
 This project is an IntelliJ Platform port of [Pixel Agents](https://github.com/pablodelucca/pixel-agents) by [Pablo De Lucca](https://github.com/pablodelucca), originally built as a VS Code extension. The core concepts — JSONL transcript watching, pixel art office rendering, character state machine — originate from the original project.
 
+### Theme assets
+
+| Theme | Floor / wall / furniture sprites | Character sprites |
+|---|---|---|
+| `default` (office) | [Office Interior Tileset (16x16)](https://donarg.itch.io/officetileset) by Donarg (purchase required, not bundled) | Original — adapted from upstream Pixel Agents |
+| `alien` | Custom pixel art for this project | Custom pixel art for this project |
+| `cat` (cat cafe) | Custom pixel art for this project | Custom pixel art for this project |
+| `zoo` | Custom pixel art for this project | Custom pixel art for this project |
+
+Custom-themed assets were created specifically for this fork and are released under the same MIT license as the rest of the source. The `default` office tileset is third-party and must be purchased from itch.io to use the full furniture catalog; the plugin ships with reduced built-in defaults so it remains functional without it.
+
+### Fonts
+
+The pixel UI font is **FS Pixel Sans** (bundled at `webview-ui/src/fonts/`). Refer to that directory for the exact license terms.
+
 ## Contributing
 
 See [CONTRIBUTORS.md](CONTRIBUTORS.md) for instructions on how to contribute.

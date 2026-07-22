@@ -12,6 +12,72 @@ class TranscriptParser(
     companion object {
         /** Tool names that spawn sub-agent characters (Claude Code uses "Agent", legacy uses "Task") */
         val SUBAGENT_TOOL_NAMES = setOf("Task", "Agent")
+
+        /**
+         * Pure render of a tool_use's display string. Exposed at the companion level
+         * so unit tests can call it without instantiating the parser.
+         */
+        fun formatToolStatus(toolName: String, input: Map<String, Any?>): String {
+            fun base(p: Any?): String = if (p is String) File(p).name else ""
+            return when (toolName) {
+                "Read" -> "Reading ${base(input["file_path"])}"
+                "Edit" -> "Editing ${base(input["file_path"])}"
+                "Write" -> "Writing ${base(input["file_path"])}"
+                "Bash" -> {
+                    val cmd = (input["command"] as? String) ?: ""
+                    "Running: ${if (cmd.length > Constants.BASH_COMMAND_DISPLAY_MAX_LENGTH) cmd.take(Constants.BASH_COMMAND_DISPLAY_MAX_LENGTH) + "…" else cmd}"
+                }
+                "Glob" -> "Searching files"
+                "Grep" -> "Searching code"
+                "WebFetch" -> "Fetching web content"
+                "WebSearch" -> "Searching the web"
+                "Task", "Agent" -> {
+                    val desc = input["description"] as? String ?: ""
+                    val subType = input["subagent_type"] as? String ?: ""
+                    val prefix = if (subType.isNotEmpty()) "Subtask[$subType]: " else "Subtask: "
+                    if (desc.isNotEmpty()) "$prefix${if (desc.length > Constants.TASK_DESCRIPTION_DISPLAY_MAX_LENGTH) desc.take(Constants.TASK_DESCRIPTION_DISPLAY_MAX_LENGTH) + "…" else desc}"
+                    else "Running subtask"
+                }
+                "AskUserQuestion" -> "Waiting for your answer"
+                "EnterPlanMode" -> "Planning"
+                "NotebookEdit" -> "Editing notebook"
+                else -> "Using $toolName"
+            }
+        }
+
+        /**
+         * Sum of "prompt-side" context tokens used in a Claude assistant record's
+         * `message.usage` block. Excludes output_tokens since those don't recur in
+         * the next turn's context. Returns 0 if the usage map is missing or all
+         * fields are zero.
+         */
+        fun extractContextTokens(usage: Map<String, Any?>?): Long {
+            if (usage == null) return 0L
+            val input = (usage["input_tokens"] as? Number)?.toLong() ?: 0L
+            val cacheCreate = (usage["cache_creation_input_tokens"] as? Number)?.toLong() ?: 0L
+            val cacheRead = (usage["cache_read_input_tokens"] as? Number)?.toLong() ?: 0L
+            return input + cacheCreate + cacheRead
+        }
+
+        /** All four token fields out of one usage block, for cumulative tracking. */
+        data class TurnTokens(
+            val input: Long,
+            val cacheCreate: Long,
+            val cacheRead: Long,
+            val output: Long,
+        ) {
+            val total: Long get() = input + cacheCreate + cacheRead + output
+        }
+
+        fun extractTurnTokens(usage: Map<String, Any?>?): TurnTokens {
+            if (usage == null) return TurnTokens(0L, 0L, 0L, 0L)
+            return TurnTokens(
+                input = (usage["input_tokens"] as? Number)?.toLong() ?: 0L,
+                cacheCreate = (usage["cache_creation_input_tokens"] as? Number)?.toLong() ?: 0L,
+                cacheRead = (usage["cache_read_input_tokens"] as? Number)?.toLong() ?: 0L,
+                output = (usage["output_tokens"] as? Number)?.toLong() ?: 0L,
+            )
+        }
     }
 
     private val gson = Gson()
@@ -41,34 +107,6 @@ class TranscriptParser(
      */
     var onTryBindSubagentFiles: ((agentId: Int) -> Unit)? = null
 
-    fun formatToolStatus(toolName: String, input: Map<String, Any?>): String {
-        fun base(p: Any?): String = if (p is String) File(p).name else ""
-        return when (toolName) {
-            "Read" -> "Reading ${base(input["file_path"])}"
-            "Edit" -> "Editing ${base(input["file_path"])}"
-            "Write" -> "Writing ${base(input["file_path"])}"
-            "Bash" -> {
-                val cmd = (input["command"] as? String) ?: ""
-                "Running: ${if (cmd.length > Constants.BASH_COMMAND_DISPLAY_MAX_LENGTH) cmd.take(Constants.BASH_COMMAND_DISPLAY_MAX_LENGTH) + "\u2026" else cmd}"
-            }
-            "Glob" -> "Searching files"
-            "Grep" -> "Searching code"
-            "WebFetch" -> "Fetching web content"
-            "WebSearch" -> "Searching the web"
-            "Task", "Agent" -> {
-                val desc = input["description"] as? String ?: ""
-                val subType = input["subagent_type"] as? String ?: ""
-                val prefix = if (subType.isNotEmpty()) "Subtask[$subType]: " else "Subtask: "
-                if (desc.isNotEmpty()) "$prefix${if (desc.length > Constants.TASK_DESCRIPTION_DISPLAY_MAX_LENGTH) desc.take(Constants.TASK_DESCRIPTION_DISPLAY_MAX_LENGTH) + "\u2026" else desc}"
-                else "Running subtask"
-            }
-            "AskUserQuestion" -> "Waiting for your answer"
-            "EnterPlanMode" -> "Planning"
-            "NotebookEdit" -> "Editing notebook"
-            else -> "Using $toolName"
-        }
-    }
-
     @Suppress("UNCHECKED_CAST")
     fun processTranscriptLine(agentId: Int, line: String) {
         val agent = agents[agentId] ?: return
@@ -97,6 +135,37 @@ class TranscriptParser(
         val content = message["content"] as? List<Map<String, Any?>> ?: return
         val hasToolUse = content.any { it["type"] == "tool_use" }
 
+        // Extract context-window usage and per-turn tokens. extractContextTokens
+        // sums the prompt-side tokens (input + cache_creation + cache_read) for
+        // the HP gauge; extractTurnTokens returns all four buckets so we can
+        // accumulate cumulative API throughput for cost estimation.
+        @Suppress("UNCHECKED_CAST")
+        val usage = message["usage"] as? Map<String, Any?>
+        val total = extractContextTokens(usage)
+        val turn = extractTurnTokens(usage)
+        val model = (message["model"] as? String).orEmpty()
+        val turnHasTokens = turn.total > 0L
+        val contextChanged = total > 0L && total != agent.lastContextTokens
+        val modelChanged = model.isNotEmpty() && model != agent.lastModel
+        if (contextChanged || modelChanged || turnHasTokens) {
+            agent.lastContextTokens = total.coerceAtLeast(agent.lastContextTokens)
+            if (model.isNotEmpty()) agent.lastModel = model
+            if (turnHasTokens) {
+                agent.cumulativeInput += turn.input
+                agent.cumulativeCacheCreate += turn.cacheCreate
+                agent.cumulativeCacheRead += turn.cacheRead
+                agent.cumulativeOutput += turn.output
+            }
+            val payload = mutableMapOf<String, Any?>("id" to agentId)
+            if (total > 0L) payload["contextTokens"] = total
+            if (model.isNotEmpty()) payload["model"] = model
+            payload["cumulativeInput"] = agent.cumulativeInput
+            payload["cumulativeCacheCreate"] = agent.cumulativeCacheCreate
+            payload["cumulativeCacheRead"] = agent.cumulativeCacheRead
+            payload["cumulativeOutput"] = agent.cumulativeOutput
+            sendToWebview("agentUsage", payload)
+        }
+
         if (hasToolUse) {
             timerManager.cancelWaitingTimer(agentId)
             agent.isWaiting = false
@@ -115,6 +184,14 @@ class TranscriptParser(
                     agent.activeToolStatuses[blockId] = status
                     agent.activeToolNames[blockId] = toolName
 
+                    // Background Bash (run_in_background: true) keeps the character
+                    // active until its tool_result arrives — even across turn_duration
+                    // (BEHAVIOR_SPEC §2). Track the id so processTurnDuration and the
+                    // stale-session check can exempt it.
+                    if (toolName == "Bash" && input["run_in_background"] == true) {
+                        agent.backgroundToolIds.add(blockId)
+                    }
+
                     if (toolName !in TimerManager.PERMISSION_EXEMPT_TOOLS) {
                         hasNonExemptTool = true
                     }
@@ -123,6 +200,12 @@ class TranscriptParser(
                         "id" to agentId,
                         "toolId" to blockId,
                         "status" to status,
+                        // Attach this turn's output_tokens so the webview can show a
+                        // per-tool token delta. If multiple tool_uses appear in the
+                        // same assistant turn they all carry the same value (we have
+                        // no way to split it further from the JSONL). Webview must
+                        // treat repeated values within a turn as shared, not summed.
+                        "outputTokens" to turn.output,
                     ))
 
                     // Register this Agent/Task tool_use so the folder watcher can
@@ -202,6 +285,9 @@ class TranscriptParser(
                         agent.activeToolIds.remove(completedToolId)
                         agent.activeToolStatuses.remove(completedToolId)
                         agent.activeToolNames.remove(completedToolId)
+                        // Background Bash finished (or was killed) — its tool_result
+                        // is the completion signal, releasing the stay-active exemption.
+                        agent.backgroundToolIds.remove(completedToolId)
 
                         val toolId = completedToolId
                         delayScheduler.schedule({
@@ -219,13 +305,11 @@ class TranscriptParser(
                 // New user text prompt — new turn starting
                 timerManager.cancelWaitingTimer(agentId)
                 timerManager.clearAgentActivity(agent, agentId)
-                agent.hadToolsInTurn = false
             }
         } else if (content is String && content.trim().isNotEmpty()) {
             // New user text prompt — new turn starting
             timerManager.cancelWaitingTimer(agentId)
             timerManager.clearAgentActivity(agent, agentId)
-            agent.hadToolsInTurn = false
         }
     }
 
@@ -233,10 +317,28 @@ class TranscriptParser(
         timerManager.cancelWaitingTimer(agentId)
         timerManager.cancelPermissionTimer(agentId)
 
+        // Background Bash (run_in_background) survives turn end: the shell keeps
+        // running after end_turn and only its eventual tool_result releases it
+        // (BEHAVIOR_SPEC §2 — "background Bash 진행 중이면 계속 active").
+        val hasBackgroundTools = agent.backgroundToolIds.isNotEmpty()
+
         if (agent.activeToolIds.isNotEmpty()) {
-            agent.activeToolIds.clear()
-            agent.activeToolStatuses.clear()
-            agent.activeToolNames.clear()
+            if (hasBackgroundTools) {
+                // Drop only the non-background stragglers; each completed tool
+                // already got its agentToolDone from the tool_result path, so a
+                // blanket clear would also wipe the still-running background tool.
+                val dropped = agent.activeToolIds.filter { it !in agent.backgroundToolIds }
+                for (toolId in dropped) {
+                    agent.activeToolIds.remove(toolId)
+                    agent.activeToolStatuses.remove(toolId)
+                    agent.activeToolNames.remove(toolId)
+                    sendToWebview("agentToolDone", mapOf("id" to agentId, "toolId" to toolId))
+                }
+            } else {
+                agent.activeToolIds.clear()
+                agent.activeToolStatuses.clear()
+                agent.activeToolNames.clear()
+            }
             // Preserve tool state for async sub-agents (they keep running in background)
             val preservedSubIds = agent.asyncSubagents.keys.toSet()
             agent.activeSubagentToolIds.keys.retainAll(preservedSubIds)
@@ -248,11 +350,22 @@ class TranscriptParser(
             // parent's turn_duration record — see FileWatcher.ensureSubagentFolderWatch).
             val hasLiveOrPendingSubs =
                 agent.asyncSubagents.isNotEmpty() || agent.pendingSubagentIds.isNotEmpty()
-            if (hasLiveOrPendingSubs) {
-                sendToWebview("agentToolsClearParentOnly", mapOf("id" to agentId))
-            } else {
-                sendToWebview("agentToolsClear", mapOf("id" to agentId))
+            if (!hasBackgroundTools) {
+                if (hasLiveOrPendingSubs) {
+                    sendToWebview("agentToolsClearParentOnly", mapOf("id" to agentId))
+                } else {
+                    sendToWebview("agentToolsClear", mapOf("id" to agentId))
+                }
             }
+        }
+
+        if (hasBackgroundTools) {
+            // Stay active: the background shell is still doing work. bash_progress
+            // records keep arriving for the retained tool id and keep the JSONL
+            // fresh; the matching tool_result flips us to the normal idle path.
+            agent.permissionSent = false
+            sendToWebview("agentStatus", mapOf("id" to agentId, "status" to "active"))
+            return
         }
 
         agent.isWaiting = true
@@ -375,6 +488,7 @@ class TranscriptParser(
             parentToolId = parentToolId,
             subagentId = subagentId,
             jsonlFile = subagentPath,
+            taskStatus = agent.activeToolStatuses[parentToolId] ?: "",
         )
         onAsyncSubagentDetected?.invoke(agentId, parentToolId, subagentPath)
     }

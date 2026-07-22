@@ -13,7 +13,9 @@ import { useEditorActions } from './hooks/useEditorActions.js'
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js'
 import { ZoomControls } from './components/ZoomControls.js'
 import { BottomToolbar } from './components/BottomToolbar.js'
+import { BottomHUD } from './components/BottomHUD.js'
 import { DebugView } from './components/DebugView.js'
+import { AgentTaskQueue } from './components/AgentTaskQueue.js'
 
 // Game state lives outside React — updated imperatively by message handlers
 const officeStateRef = { current: null as OfficeState | null }
@@ -121,7 +123,7 @@ function App() {
 
   const isEditDirty = useCallback(() => editor.isEditMode && editor.isDirty, [editor.isEditMode, editor.isDirty])
 
-  const { agents, selectedAgent, agentTools, agentStatuses, subagentTools, subagentCharacters, layoutReady, loadedAssets, currentTheme } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty)
+  const { agents, selectedAgent, agentTools, agentStatuses, agentUsage, agentModel, agentCumulative, agentDisplayNames, agentWorktreeBranches, subagentTools, subagentCharacters, layoutReady, loadedAssets, currentTheme, overlayDefaults, setOverlayDefault, sharedLayoutAcrossProjects, setSharedLayoutAcrossProjects, unifiedView, setUnifiedView, quotaTokens, bridgeMode, topOffset } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty)
 
   const [isDebugMode, setIsDebugMode] = useState(false)
 
@@ -184,7 +186,7 @@ function App() {
   }
 
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
+    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', paddingTop: topOffset, boxSizing: 'border-box' }}>
       <style>{`
         @keyframes pixel-agents-pulse {
           0%, 100% { opacity: 1; }
@@ -208,6 +210,7 @@ function App() {
         zoom={editor.zoom}
         onZoomChange={editor.handleZoomChange}
         panRef={editor.panRef}
+        overlayDefaults={overlayDefaults}
       />
 
       <ZoomControls zoom={editor.zoom} onZoomChange={editor.handleZoomChange} />
@@ -230,6 +233,13 @@ function App() {
         isDebugMode={isDebugMode}
         onToggleDebugMode={handleToggleDebugMode}
         currentTheme={currentTheme}
+        overlayDefaults={overlayDefaults}
+        onOverlayDefaultChange={setOverlayDefault}
+        sharedLayoutAcrossProjects={sharedLayoutAcrossProjects}
+        onToggleSharedLayout={setSharedLayoutAcrossProjects}
+        unifiedView={unifiedView}
+        onToggleUnifiedView={setUnifiedView}
+        bridgeMode={bridgeMode}
       />
 
       {editor.isEditMode && editor.isDirty && (
@@ -289,11 +299,31 @@ function App() {
         officeState={officeState}
         agents={agents}
         agentTools={agentTools}
+        agentStatuses={agentStatuses}
+        agentUsage={agentUsage}
+        agentModel={agentModel}
+        agentCumulative={agentCumulative}
+        agentDisplayNames={agentDisplayNames}
+        agentWorktreeBranches={agentWorktreeBranches}
         subagentCharacters={subagentCharacters}
         containerRef={containerRef}
         zoom={editor.zoom}
         panRef={editor.panRef}
         onCloseAgent={handleCloseAgent}
+      />
+
+      <AgentTaskQueue
+        officeState={officeState}
+        agentTools={agentTools}
+      />
+
+      <BottomHUD
+        agents={agents}
+        agentModel={agentModel}
+        agentCumulative={agentCumulative}
+        agentTools={agentTools}
+        agentStatuses={agentStatuses}
+        quotaTokens={quotaTokens}
       />
 
       {isDebugMode && (

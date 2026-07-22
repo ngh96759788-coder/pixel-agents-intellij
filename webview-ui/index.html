@@ -1,10 +1,17 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" translate="no">
   <head>
     <meta charset="UTF-8" />
+    <!-- Suppress Chrome's Google Translate popup. The widget mixes
+         English + Korean UI text, so Chrome's language detector offers
+         to translate the "en" page. The --disable-translate launch flag
+         is unreliable (ignored depending on Chrome version / profile
+         reuse), so we block at the page level too — this is the
+         authoritative opt-out. -->
+    <meta name="google" content="notranslate" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>webview-ui</title>
+    <title>Pixel Office</title>
     <script>
       // JCEF DPR diagnostic + conditional override.
       (function() {

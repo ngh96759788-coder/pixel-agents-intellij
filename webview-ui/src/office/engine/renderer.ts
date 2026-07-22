@@ -6,9 +6,11 @@ import { getCharacterSprite } from './characters.js'
 import { renderMatrixEffect } from './matrixEffect.js'
 import { getColorizedFloorSprite, hasFloorSprites, WALL_COLOR } from '../floorTiles.js'
 import { hasWallSprites, getWallInstances, wallColorToHex } from '../wallTiles.js'
+import { contextWindowFor } from '../usage.js'
 import {
   CHARACTER_SITTING_OFFSET_PX,
   CHARACTER_Z_SORT_OFFSET,
+  EXTERNAL_AGENT_ALPHA,
   OUTLINE_Z_SORT_OFFSET,
   SELECTED_OUTLINE_ALPHA,
   HOVERED_OUTLINE_ALPHA,
@@ -134,6 +136,12 @@ export function renderScene(
     // Sort characters by bottom of their tile (not center) so they render
     // in front of same-row furniture (e.g. chairs) but behind furniture
     // at lower rows (e.g. desks, bookshelves that occlude from below).
+    // We used to subtract TILE_SIZE*2 when the character was typing facing
+    // UP so the desk above them visually occluded their torso — that hack
+    // is gone now because (a) workstations carry `zSortBoost: 24` so they
+    // already render in front of the character, and (b) the hack made
+    // top-row consoles cover characters too aggressively (the user only
+    // wants workstations in front, not the small wall consoles).
     const charZY = ch.y + TILE_SIZE / 2 + CHARACTER_Z_SORT_OFFSET
 
     // Matrix spawn/despawn effect — skip outline, use per-pixel rendering
@@ -171,10 +179,20 @@ export function renderScene(
       })
     }
 
+    // Unified view (BEHAVIOR_SPEC §4): external-source characters render at
+    // 85% opacity so they're visually distinct from this window's own work.
+    const charAlpha = ch.isExternal ? EXTERNAL_AGENT_ALPHA : 1
     drawables.push({
       zY: charZY,
       draw: (c) => {
-        c.drawImage(cached, drawX, drawY)
+        if (charAlpha < 1) {
+          c.save()
+          c.globalAlpha = charAlpha
+          c.drawImage(cached, drawX, drawY)
+          c.restore()
+        } else {
+          c.drawImage(cached, drawX, drawY)
+        }
       },
     })
   }
@@ -446,6 +464,616 @@ export function renderRotateButton(
   return { cx, cy, radius }
 }
 
+// ── Parent → sub-agent tether lines ────────────────────────────
+//
+// A short pixel-art "string" between each sub-agent and its parent main
+// agent so the family relationship is visible on the floor even when the
+// two characters wander apart. Drawn under furniture/characters in the
+// scene order so it never occludes sprites. Dashed by skipping every other
+// pixel along the line for that hand-stippled pixel feel.
+// Soft yellow-green so the dashed thread reads against both warm wood
+// and cool sci-fi floors without screaming for attention. Bumped alpha
+// over the first iteration's barely-visible parchment yellow.
+const TETHER_COLOR = 'rgba(150, 220, 130, 0.85)'
+const TETHER_DASH = 2 // sprite-pixel dash length
+
+export function renderParentTethers(
+  ctx: CanvasRenderingContext2D,
+  characters: Character[],
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+  shouldDraw?: (subId: number, parentId: number) => boolean,
+): void {
+  const charById = new Map<number, Character>()
+  for (const ch of characters) charById.set(ch.id, ch)
+
+  ctx.save()
+  ctx.fillStyle = TETHER_COLOR
+  for (const ch of characters) {
+    if (!ch.isSubagent) continue
+    if (ch.parentAgentId == null) continue
+    if (ch.matrixEffect === 'despawn') continue
+    const parent = charById.get(ch.parentAgentId)
+    if (!parent) continue
+    if (parent.matrixEffect === 'despawn') continue
+    if (shouldDraw && !shouldDraw(ch.id, parent.id)) continue
+
+    // Anchor at each character's torso (slightly above the foot anchor).
+    const x1 = offsetX + ch.x * zoom
+    const y1 = offsetY + (ch.y - 8) * zoom
+    const x2 = offsetX + parent.x * zoom
+    const y2 = offsetY + (parent.y - 8) * zoom
+
+    // Step along the line in sprite-pixel units, drawing 1-sprite-pixel
+    // squares scaled by zoom — keeps the dash pattern crisp at any zoom.
+    const dxPx = (x2 - x1) / zoom
+    const dyPx = (y2 - y1) / zoom
+    const lenPx = Math.hypot(dxPx, dyPx)
+    if (lenPx < 1) continue
+    const stepX = dxPx / lenPx
+    const stepY = dyPx / lenPx
+    for (let i = 0; i < lenPx; i++) {
+      // dash on/off pattern: TETHER_DASH on, TETHER_DASH off
+      const phase = Math.floor(i / TETHER_DASH) % 2
+      if (phase !== 0) continue
+      const px = Math.round(x1 + stepX * i * zoom)
+      const py = Math.round(y1 + stepY * i * zoom)
+      ctx.fillRect(px, py, zoom, zoom)
+    }
+  }
+  ctx.restore()
+}
+
+// ── HP-style context-window bar above each character ────────────
+//
+// Always-visible pixel bar that mimics classic RPG nameplate gauges:
+// fills as the agent burns context tokens, color-shifts green→amber→red
+// as it approaches the model window limit. Replaces "user has to hover
+// to know how much room is left" with an at-a-glance signal.
+const HP_BAR_WIDTH_PX = 8    // matches the 8×8 badge slot width
+const HP_BAR_HEIGHT_PX = 3
+/** Fallback when no model has been resolved on the character yet.
+ *  Real per-character scale comes from `contextWindowFor(ch.model)`. */
+const FALLBACK_CONTEXT_LIMIT = 200_000
+
+function hpBarColor(ratio: number): string {
+  if (ratio >= 0.85) return '#d05050' // muted brick red
+  if (ratio >= 0.65) return '#d6b25a' // muted gold
+  return '#6fb87a'                     // muted forest green
+}
+
+export function renderHpBars(
+  ctx: CanvasRenderingContext2D,
+  characters: Character[],
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+  shouldDraw?: (chId: number) => boolean,
+): void {
+  ctx.save()
+  for (const ch of characters) {
+    if (ch.matrixEffect === 'despawn') continue
+    if (shouldDraw && !shouldDraw(ch.id)) continue
+
+    // Progress-bar treatment: always draw the empty track full-width so the
+    // bar reads as "0% full" instead of "missing" when contextTokens isn't
+    // known yet. Fill grows from the left as tokens accumulate.
+    const tokens = ch.contextTokens > 0 ? ch.contextTokens : 0
+    const limit = ch.model ? contextWindowFor(ch.model) : FALLBACK_CONTEXT_LIMIT
+    const ratio = Math.min(1, tokens / limit)
+    const sittingOff = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0
+    // Sit in the right slot of the head-plate strip, vertically centered
+    // with the 7-tall identity/status icons so the bar reads as part of
+    // the same row instead of dangling above/below it.
+    const headTop = ch.y + sittingOff - 24
+    const topY = headTop - HEADPLATE_OFFSET_ABOVE_HEAD + Math.floor((ICON_H - HP_BAR_HEIGHT_PX) / 2)
+    const leftX = ch.x + HP_LEFT_OFFSET
+
+    const barX = Math.round(offsetX + leftX * zoom)
+    const barY = Math.round(offsetY + topY * zoom)
+    const barW = HP_BAR_WIDTH_PX * zoom
+    const barH = HP_BAR_HEIGHT_PX * zoom
+
+    // 1px pixel border (no anti-aliasing — use fillRect quad).
+    ctx.fillStyle = '#1a1a24'
+    ctx.fillRect(barX - zoom, barY - zoom, barW + 2 * zoom, barH + 2 * zoom)
+    // empty track — always visible
+    ctx.fillStyle = '#3a3a4a'
+    ctx.fillRect(barX, barY, barW, barH)
+    // filled portion (zero when no tokens reported yet)
+    if (ratio > 0) {
+      const fillW = Math.max(zoom, Math.floor(barW * ratio))
+      ctx.fillStyle = hpBarColor(ratio)
+      ctx.fillRect(barX, barY, fillW, barH)
+    }
+  }
+  ctx.restore()
+}
+
+// ── 5×7 pixel-letter icons for status & identity ───────────────
+//
+// Hand-coded monochrome masks. Rectangular (5 wide × 7 tall) so they
+// stack in a horizontal nameplate strip next to the HP bar — game-UI
+// convention rather than the vertical totem the first iteration had.
+// Each character cell becomes a 1-zoom-pixel square at render time.
+type IconMask = ReadonlyArray<string>
+const ICON_H = 7
+// Width is implicit in each mask row length (5); reserved here for any
+// future layout helper that wants symbolic width.
+
+// Active — small gear fallback. Used until host loads a PNG asset.
+const DEFAULT_ICON_ACTIVE: IconMask = [
+  '.X.X.',
+  'XXXXX',
+  'X...X',
+  'X...X',
+  'X...X',
+  'XXXXX',
+  '.X.X.',
+]
+let ICON_ACTIVE: IconMask = DEFAULT_ICON_ACTIVE
+// Default fallback masks — used when no PNG sprites have been loaded.
+// The host (IntelliJ plugin or MCP bridge) overrides these via
+// `setStatusIcons` with real assets (chaicon, MIT).
+const DEFAULT_ICON_IDLE: IconMask = [
+  '.XXX.',
+  'XX...',
+  'XX...',
+  'XX...',
+  'XX...',
+  'XX...',
+  '.XXX.',
+]
+const DEFAULT_ICON_WAIT: IconMask = [
+  '..X..',
+  '..X..',
+  '..X..',
+  '..X..',
+  '.....',
+  '..X..',
+  '..X..',
+]
+let ICON_IDLE: IconMask = DEFAULT_ICON_IDLE
+let ICON_WAIT: IconMask = DEFAULT_ICON_WAIT
+// Default identity icons — fallback when no PNG assets have been loaded
+// from the extension/bridge (block letters M and S). The host overrides
+// these via `setIdentityIcons()` with CC0 pixel-art sprites from
+// tstamborski/pixelart-icons (star for main, diamond for sub).
+const DEFAULT_ICON_MAIN: IconMask = [
+  'X...X',
+  'XX.XX',
+  'X.X.X',
+  'X.X.X',
+  'X...X',
+  'X...X',
+  'X...X',
+]
+const DEFAULT_ICON_SUB: IconMask = [
+  '.XXXX',
+  'X....',
+  'X....',
+  '.XXX.',
+  '....X',
+  '....X',
+  'XXXX.',
+]
+let ICON_MAIN: IconMask = DEFAULT_ICON_MAIN
+let ICON_SUB: IconMask = DEFAULT_ICON_SUB
+
+/** Convert a loaded PNG sprite (2D hex-string array with "" for
+ *  transparency) to the simple X/. mask format `drawPixelIcon`
+ *  expects. Trims transparent borders so the badge sits compactly
+ *  in its head-plate slot. */
+function spriteToMask(sprite: string[][]): IconMask {
+  if (sprite.length === 0) return ['.']
+  let minX = sprite[0].length, minY = sprite.length, maxX = -1, maxY = -1
+  for (let y = 0; y < sprite.length; y++) {
+    const row = sprite[y]
+    for (let x = 0; x < row.length; x++) {
+      if (row[x]) {
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+      }
+    }
+  }
+  if (maxX < 0) return ['.']
+  const mask: string[] = []
+  for (let y = minY; y <= maxY; y++) {
+    let row = ''
+    for (let x = minX; x <= maxX; x++) row += sprite[y][x] ? 'X' : '.'
+    mask.push(row)
+  }
+  return mask
+}
+
+// Untrimmed source sprites (preserves original aspect/positioning).
+let SPRITE_MAIN: string[][] | null = null
+let SPRITE_SUB: string[][] | null = null
+let SPRITE_ACTIVE: string[][] | null = null
+let SPRITE_WAIT: string[][] | null = null
+let SPRITE_IDLE: string[][] | null = null
+// Kenney 9-slice frame asset. When loaded, every head badge is
+// composited as: 9-slice frame back → icon centered on top.
+let SPRITE_FRAME: string[][] | null = null
+
+/** Trim transparent borders from a sprite. Currently unused (we pass
+ *  full sprites through so the 9-slice frame centering still works on
+ *  the native 16×16 canvas), but kept around for cases where a host
+ *  ships icons with large transparent padding. */
+// @ts-expect-error retained for future host-side trimming use
+function trimSprite(sprite: string[][]): string[][] | null {
+  if (sprite.length === 0) return null
+  let minX = sprite[0].length, minY = sprite.length, maxX = -1, maxY = -1
+  for (let y = 0; y < sprite.length; y++) {
+    const row = sprite[y]
+    for (let x = 0; x < row.length; x++) {
+      if (row[x]) {
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+      }
+    }
+  }
+  if (maxX < 0) return null
+  const out: string[][] = []
+  for (let y = minY; y <= maxY; y++) {
+    const row: string[] = []
+    for (let x = minX; x <= maxX; x++) row.push(sprite[y][x] || '')
+    out.push(row)
+  }
+  return out
+}
+
+/** Replace the fallback identity icons with sprites loaded by the
+ *  host. Pass `null` to keep the existing fallback in that slot. */
+export function setIdentityIcons(main: string[][] | null, sub: string[][] | null): void {
+  if (main && main.length > 0) {
+    ICON_MAIN = spriteToMask(main)
+    // Keep untrimmed so framed compositing can rely on the native 16×16
+    // canvas placement.
+    SPRITE_MAIN = main
+  }
+  if (sub && sub.length > 0) {
+    ICON_SUB = spriteToMask(sub)
+    SPRITE_SUB = sub
+  }
+}
+
+/** Provide the Kenney 9-slice frame asset (untrimmed). When set,
+ *  every head badge gets the frame composited behind the icon. */
+export function setHeadFrame(frame: string[][] | null): void {
+  SPRITE_FRAME = (frame && frame.length > 0) ? frame : null
+}
+
+/** Replace the fallback status icons (active / wait / idle). Pass
+ *  `null` for any slot to keep the existing fallback there. */
+export function setStatusIcons(
+  active: string[][] | null,
+  wait: string[][] | null,
+  idle: string[][] | null,
+): void {
+  if (active && active.length > 0) {
+    ICON_ACTIVE = spriteToMask(active)
+    SPRITE_ACTIVE = active
+  }
+  if (wait && wait.length > 0) {
+    ICON_WAIT = spriteToMask(wait)
+    SPRITE_WAIT = wait
+  }
+  if (idle && idle.length > 0) {
+    ICON_IDLE = spriteToMask(idle)
+    SPRITE_IDLE = idle
+  }
+}
+
+// Target output size for a head badge in sprite-pixels. Sized down to
+// 8×8 so two badges + HP bar fit neatly above a 24-px character head
+// without dwarfing the character art. 9-slice corner=2 keeps the
+// rounded edge from the source Kenney frame.
+const BADGE_PX = 8
+const FRAME_CORNER = 2
+
+/** Resize a sprite via 9-slice — corners preserved, edges stretched/
+ *  tiled, centre filled. Returns a `target×target` sprite. */
+function nineSliceResize(src: string[][], target: number, corner: number): string[][] {
+  const H = src.length
+  const W = H > 0 ? src[0].length : 0
+  const out: string[][] = []
+  const srcEdge = W - 2 * corner
+  const dstEdge = target - 2 * corner
+  for (let dy = 0; dy < target; dy++) {
+    const row: string[] = []
+    let sy: number
+    if (dy < corner) sy = dy
+    else if (dy >= target - corner) sy = H - (target - dy)
+    else sy = corner + Math.floor(((dy - corner) / dstEdge) * srcEdge)
+    sy = Math.max(0, Math.min(H - 1, sy))
+    const srcRow = src[sy] ?? []
+    for (let dx = 0; dx < target; dx++) {
+      let sx: number
+      if (dx < corner) sx = dx
+      else if (dx >= target - corner) sx = W - (target - dx)
+      else sx = corner + Math.floor(((dx - corner) / dstEdge) * srcEdge)
+      sx = Math.max(0, Math.min(W - 1, sx))
+      row.push(srcRow[sx] ?? '')
+    }
+    out.push(row)
+  }
+  return out
+}
+
+/** Bbox-trim a sprite then nearest-neighbor sample to a target size,
+ *  preserving original hex colors. Used when the source icon (e.g.
+ *  16×16 chaicon) is larger than the inner area of the frame. */
+function downsampleSprite(sprite: string[][], target: number): string[][] {
+  // Trim transparent borders to maximize useful pixels in the result.
+  let minX = sprite[0]?.length ?? 0, minY = sprite.length, maxX = -1, maxY = -1
+  for (let y = 0; y < sprite.length; y++) {
+    const row = sprite[y]
+    for (let x = 0; x < row.length; x++) {
+      if (row[x]) {
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+      }
+    }
+  }
+  if (maxX < 0) return Array.from({ length: target }, () => Array(target).fill(''))
+  const srcW = maxX - minX + 1, srcH = maxY - minY + 1
+  const out: string[][] = []
+  for (let y = 0; y < target; y++) {
+    const row: string[] = []
+    const sy = minY + Math.floor(y * srcH / target)
+    for (let x = 0; x < target; x++) {
+      const sx = minX + Math.floor(x * srcW / target)
+      row.push(sprite[sy]?.[sx] ?? '')
+    }
+    out.push(row)
+  }
+  return out
+}
+
+/** Composite icon centered onto frame (returns new sprite). If the icon
+ *  is larger than the frame's inner area (frame size minus 2-px padding),
+ *  the icon is bbox-trimmed and nearest-neighbor downsampled to fit. */
+function compositeFramedBadge(frame: string[][], icon: string[][]): string[][] {
+  const target = frame.length
+  const innerSize = Math.max(1, target - 2)  // 1-px padding each side
+  const out: string[][] = frame.map((row) => row.slice())
+  // Downsample the icon if it's bigger than the inner area.
+  const iconH = icon.length
+  const iconW = iconH > 0 ? icon[0].length : 0
+  const useIcon = (iconW > innerSize || iconH > innerSize)
+    ? downsampleSprite(icon, innerSize)
+    : icon
+  const ih = useIcon.length
+  const iw = ih > 0 ? useIcon[0].length : 0
+  const offX = Math.floor((target - iw) / 2)
+  const offY = Math.floor((target - ih) / 2)
+  for (let y = 0; y < ih; y++) {
+    for (let x = 0; x < iw; x++) {
+      const c = useIcon[y][x]
+      if (!c) continue
+      const tx = offX + x, ty = offY + y
+      if (tx < 0 || ty < 0 || tx >= target || ty >= target) continue
+      out[ty][tx] = c
+    }
+  }
+  return out
+}
+
+// Cached 9-slice resized frame so we don't recompute every frame.
+let CACHED_FRAME: string[][] | null = null
+let CACHED_FRAME_SOURCE: string[][] | null = null
+function getResizedFrame(): string[][] | null {
+  if (!SPRITE_FRAME) return null
+  if (CACHED_FRAME_SOURCE === SPRITE_FRAME && CACHED_FRAME) return CACHED_FRAME
+  CACHED_FRAME = nineSliceResize(SPRITE_FRAME, BADGE_PX, FRAME_CORNER)
+  CACHED_FRAME_SOURCE = SPRITE_FRAME
+  return CACHED_FRAME
+}
+
+/** Render a multi-color sprite (hex strings per cell, "" = transparent)
+ *  preserving the original palette. Three layers for visibility on any
+ *  background:
+ *    1. dark silhouette edge (bottom/right) — anchors the shape
+ *    2. original-color fill
+ *    3. light highlight edge (top/left) — adds a soft "lit" rim that
+ *       pops the icon out of the grey Kenney frame without enlarging
+ *       it or distorting the colours. */
+function drawSpriteIcon(
+  ctx: CanvasRenderingContext2D,
+  sprite: string[][],
+  originX: number,
+  originY: number,
+  zoom: number,
+): void {
+  const lit = (r: number, c: number): boolean => {
+    const row = sprite[r]
+    return !!row && !!row[c]
+  }
+  // 1. Dark silhouette (bottom + right only, so the highlight pass has
+  //    room to brighten the top + left).
+  ctx.fillStyle = '#1a1a24'
+  for (let row = 0; row < sprite.length; row++) {
+    const line = sprite[row]
+    for (let col = 0; col < line.length; col++) {
+      if (!line[col]) continue
+      const px = Math.round(originX * zoom + col * zoom)
+      const py = Math.round(originY * zoom + row * zoom)
+      if (!lit(row + 1, col)) ctx.fillRect(px, py + zoom, zoom, 1)
+      if (!lit(row, col + 1)) ctx.fillRect(px + zoom, py, 1, zoom)
+    }
+  }
+  // 2. Original-color fill.
+  for (let row = 0; row < sprite.length; row++) {
+    const line = sprite[row]
+    for (let col = 0; col < line.length; col++) {
+      const c = line[col]
+      if (!c) continue
+      const px = Math.round(originX * zoom + col * zoom)
+      const py = Math.round(originY * zoom + row * zoom)
+      ctx.fillStyle = c
+      ctx.fillRect(px, py, zoom, zoom)
+    }
+  }
+  // 3. Light highlight edge (top + left). Cream-white reads as a soft
+  //    rim-light against the grey Kenney frame without overpowering
+  //    the icon's own colours.
+  ctx.fillStyle = '#f5efd9'
+  for (let row = 0; row < sprite.length; row++) {
+    const line = sprite[row]
+    for (let col = 0; col < line.length; col++) {
+      if (!line[col]) continue
+      const px = Math.round(originX * zoom + col * zoom)
+      const py = Math.round(originY * zoom + row * zoom)
+      if (!lit(row - 1, col)) ctx.fillRect(px, py - 1, zoom, 1)
+      if (!lit(row, col - 1)) ctx.fillRect(px - 1, py, 1, zoom)
+    }
+  }
+}
+
+/** Pixel-rasterise a mask into the canvas at the given sprite-pixel
+ *  origin. Draws a SILHOUETTE outline (only on the outer edge of the
+ *  mask, not around each pixel) followed by the fill. The per-pixel
+ *  outline approach was producing "circle cluster" halos around
+ *  disconnected pixels (e.g. stars) because each lit pixel got its
+ *  own dark blob; cells only get an outline edge facing a transparent
+ *  neighbour now. */
+function drawPixelIcon(
+  ctx: CanvasRenderingContext2D,
+  icon: IconMask,
+  originX: number, // sprite-pixel
+  originY: number, // sprite-pixel
+  zoom: number,
+  fill: string,
+): void {
+  const lit = (r: number, c: number): boolean => {
+    const row = icon[r]
+    return !!row && row[c] === 'X'
+  }
+  ctx.fillStyle = '#1a1a24'
+  for (let row = 0; row < icon.length; row++) {
+    const line = icon[row]
+    for (let col = 0; col < line.length; col++) {
+      if (line[col] !== 'X') continue
+      const px = Math.round(originX * zoom + col * zoom)
+      const py = Math.round(originY * zoom + row * zoom)
+      // Draw outline edges only on sides facing a transparent neighbour,
+      // producing a single shared silhouette around the whole shape.
+      if (!lit(row - 1, col)) ctx.fillRect(px, py - 1, zoom, 1)         // top
+      if (!lit(row + 1, col)) ctx.fillRect(px, py + zoom, zoom, 1)      // bottom
+      if (!lit(row, col - 1)) ctx.fillRect(px - 1, py, 1, zoom)         // left
+      if (!lit(row, col + 1)) ctx.fillRect(px + zoom, py, 1, zoom)      // right
+    }
+  }
+  ctx.fillStyle = fill
+  for (let row = 0; row < icon.length; row++) {
+    const line = icon[row]
+    for (let col = 0; col < line.length; col++) {
+      if (line[col] !== 'X') continue
+      const px = Math.round(originX * zoom + col * zoom)
+      const py = Math.round(originY * zoom + row * zoom)
+      ctx.fillRect(px, py, zoom, zoom)
+    }
+  }
+}
+
+// Horizontal "nameplate" strip floats this many sprite-pixels above the
+// character's head — chosen to clear the head silhouette completely so
+// the bar/icons never overlap the character art. Single row, side-by-
+// side layout (RPG-style): identity letter → status icon → HP bar.
+const HEADPLATE_OFFSET_ABOVE_HEAD = 4
+// Fixed horizontal slots relative to character.x (sprite-pixel units).
+// Character is anchored bottom-CENTER at (ch.x, ch.y) with a 16-wide
+// sprite, so ch.x IS the visual centre line. With three 8-wide slots
+// (24 total) centred on ch.x: leftmost slot starts at -12.
+//   identity at -12 (−12..−4), status at -4 (−4..+4), hp at +4 (+4..+12).
+const IDENTITY_LEFT_OFFSET = -12
+const STATUS_LEFT_OFFSET = -4
+const HP_LEFT_OFFSET = 4
+
+const COLOR_MAIN = '#5fb8c8'
+const COLOR_SUB = '#a888d8'
+const COLOR_ACTIVE = '#6fb87a'
+const COLOR_WAIT = '#d6b25a'
+const COLOR_IDLE = '#7a7a8a'
+
+export function renderIdentityDots(
+  ctx: CanvasRenderingContext2D,
+  characters: Character[],
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+  shouldDraw?: (chId: number) => boolean,
+): void {
+  ctx.save()
+  for (const ch of characters) {
+    if (ch.matrixEffect === 'despawn') continue
+    if (shouldDraw && !shouldDraw(ch.id)) continue
+    const sittingOff = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0
+    const topY = ch.y + sittingOff - 24 - HEADPLATE_OFFSET_ABOVE_HEAD
+    const leftX = ch.x + IDENTITY_LEFT_OFFSET
+    const originX = offsetX / zoom + leftX
+    const originY = offsetY / zoom + topY
+    const sprite = ch.isSubagent ? SPRITE_SUB : SPRITE_MAIN
+    const frame = getResizedFrame()
+    if (sprite && frame) {
+      const badge = compositeFramedBadge(frame, sprite)
+      drawSpriteIcon(ctx, badge, originX, originY, zoom)
+    } else if (sprite) {
+      drawSpriteIcon(ctx, sprite, originX, originY, zoom)
+    } else {
+      drawPixelIcon(
+        ctx,
+        ch.isSubagent ? ICON_SUB : ICON_MAIN,
+        originX, originY, zoom,
+        ch.isSubagent ? COLOR_SUB : COLOR_MAIN,
+      )
+    }
+  }
+  ctx.restore()
+}
+
+export function renderStatusBadges(
+  ctx: CanvasRenderingContext2D,
+  characters: Character[],
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+  shouldDraw?: (chId: number) => boolean,
+): void {
+  ctx.save()
+  for (const ch of characters) {
+    if (ch.matrixEffect === 'despawn') continue
+    if (shouldDraw && !shouldDraw(ch.id)) continue
+    const isPermission = ch.bubbleType === 'permission'
+    const icon = isPermission ? ICON_WAIT : ch.isActive ? ICON_ACTIVE : ICON_IDLE
+    const sprite = isPermission ? SPRITE_WAIT : ch.isActive ? SPRITE_ACTIVE : SPRITE_IDLE
+    const color = isPermission ? COLOR_WAIT : ch.isActive ? COLOR_ACTIVE : COLOR_IDLE
+    const sittingOff = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0
+    const topY = ch.y + sittingOff - 24 - HEADPLATE_OFFSET_ABOVE_HEAD
+    const leftX = ch.x + STATUS_LEFT_OFFSET
+    const originX = offsetX / zoom + leftX
+    const originY = offsetY / zoom + topY
+    const frame = getResizedFrame()
+    if (sprite && frame) {
+      const badge = compositeFramedBadge(frame, sprite)
+      drawSpriteIcon(ctx, badge, originX, originY, zoom)
+    } else if (sprite) {
+      drawSpriteIcon(ctx, sprite, originX, originY, zoom)
+    } else {
+      drawPixelIcon(ctx, icon, originX, originY, zoom, color)
+    }
+  }
+  ctx.restore()
+}
+
 // ── Speech bubbles ──────────────────────────────────────────────
 
 export function renderBubbles(
@@ -527,6 +1155,18 @@ export interface SelectionRenderState {
   characters: Map<number, Character>
 }
 
+/** Per-overlay "always-on" preferences mirrored from extension settings.
+ *  Each element renders for every character when its flag is true; when
+ *  false the element only appears for the currently hovered or selected
+ *  character (so the canvas stays clean while still letting the user dig
+ *  into a specific agent). */
+export interface OverlayDefaults {
+  identityDot: boolean
+  tokenBar: boolean
+  status: boolean
+  tether: boolean
+}
+
 export function renderFrame(
   ctx: CanvasRenderingContext2D,
   canvasWidth: number,
@@ -542,7 +1182,21 @@ export function renderFrame(
   tileColors?: Array<FloorColor | null>,
   layoutCols?: number,
   layoutRows?: number,
+  overlayDefaults?: OverlayDefaults,
 ): { offsetX: number; offsetY: number } {
+  const overlays: OverlayDefaults = overlayDefaults ?? {
+    identityDot: false,
+    tokenBar: false,
+    status: false,
+    tether: false,
+  }
+  const focusId = selection?.selectedAgentId ?? selection?.hoveredAgentId ?? null
+  /** Return true when this character should show a "non-default" overlay
+   *  element: either the user toggled it always-on, or the character is
+   *  currently the focus. For tether the rule is slightly broader (focus
+   *  on EITHER endpoint surfaces the line). */
+  const showFor = (chId: number, alwaysOn: boolean): boolean =>
+    alwaysOn || (focusId !== null && focusId === chId)
   // Use layout dimensions (fallback to tileMap size)
   const cols = layoutCols ?? (tileMap.length > 0 ? tileMap[0].length : 0)
   const rows = layoutRows ?? tileMap.length
@@ -563,6 +1217,12 @@ export function renderFrame(
     renderSeatIndicators(ctx, selection.seats, selection.characters, selection.selectedAgentId, selection.hoveredTile, offsetX, offsetY, zoom)
   }
 
+  // Parent → sub-agent tether lines — drawn on the floor, below sprites.
+  // Toggle on → always; off → only when sub OR its parent is focused.
+  renderParentTethers(ctx, characters, offsetX, offsetY, zoom,
+    (subId, parentId) => overlays.tether || showFor(subId, false) || showFor(parentId, false),
+  )
+
   // Build wall instances for z-sorting with furniture and characters
   const wallInstances = hasWallSprites()
     ? getWallInstances(tileMap, tileColors, layoutCols)
@@ -576,8 +1236,21 @@ export function renderFrame(
   const hoveredId = selection?.hoveredAgentId ?? null
   renderScene(ctx, allFurniture, characters, offsetX, offsetY, zoom, selectedId, hoveredId)
 
-  // Speech bubbles (always on top of characters)
-  renderBubbles(ctx, characters, offsetX, offsetY, zoom)
+  // Speech bubbles disabled — per-character status is conveyed in the hover
+  // overlay (see ToolOverlay.tsx). The pixel bubble sprites cluttered the head
+  // area and duplicated information the popup already shows.
+  void renderBubbles
+
+  // Per-character head-area overlays. Each respects its always-on flag
+  // (settings modal) and falls back to "only the hovered/selected agent
+  // gets it" otherwise — that's the contract the user asked for so the
+  // canvas is clean by default but a single hover still reveals everything.
+  renderIdentityDots(ctx, characters, offsetX, offsetY, zoom,
+    (chId) => showFor(chId, overlays.identityDot))
+  renderHpBars(ctx, characters, offsetX, offsetY, zoom,
+    (chId) => showFor(chId, overlays.tokenBar))
+  renderStatusBadges(ctx, characters, offsetX, offsetY, zoom,
+    (chId) => showFor(chId, overlays.status))
 
   // Editor overlays
   if (editor) {

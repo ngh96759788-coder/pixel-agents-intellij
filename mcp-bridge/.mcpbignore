@@ -1,0 +1,22 @@
+# The bundled server/index.mjs contains all runtime deps (esbuild inlined),
+# so we can ship a tiny .mcpb without any node_modules.
+src/
+dist/
+node_modules/
+tsconfig.json
+README.md
+.mcpbignore
+.gitignore
+package-lock.json
+pixel-agents-bridge-*.mcpb
+
+# Large preview images shipped with the React webview are not needed at
+# runtime — they're just README/screenshot assets in the upstream repo.
+web/Screenshot.jpg
+web/preview-*.png
+web/characters.png
+
+# OS / editor cruft
+.DS_Store
+*.log
+*.tsbuildinfo

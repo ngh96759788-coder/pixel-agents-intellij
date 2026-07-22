@@ -16,6 +16,12 @@ class PixelAgentsSettings : PersistentStateComponent<PixelAgentsSettings.State> 
         var agentSeats: String? = null,
         var savedLayout: String? = null,
         var theme: String = Constants.THEME_DEFAULT,
+        // Per-overlay always-on visibility toggles. False = hover/select only
+        // (default — clean canvas). True = always rendered above the character.
+        var alwaysShowIdentityDot: Boolean = false,
+        var alwaysShowTokenBar: Boolean = false,
+        var alwaysShowStatus: Boolean = false,
+        var alwaysShowTether: Boolean = false,
     )
 
     private var myState = State()
@@ -44,6 +50,22 @@ class PixelAgentsSettings : PersistentStateComponent<PixelAgentsSettings.State> 
     var theme: String
         get() = myState.theme
         set(value) { myState.theme = value }
+
+    var alwaysShowIdentityDot: Boolean
+        get() = myState.alwaysShowIdentityDot
+        set(value) { myState.alwaysShowIdentityDot = value }
+
+    var alwaysShowTokenBar: Boolean
+        get() = myState.alwaysShowTokenBar
+        set(value) { myState.alwaysShowTokenBar = value }
+
+    var alwaysShowStatus: Boolean
+        get() = myState.alwaysShowStatus
+        set(value) { myState.alwaysShowStatus = value }
+
+    var alwaysShowTether: Boolean
+        get() = myState.alwaysShowTether
+        set(value) { myState.alwaysShowTether = value }
 
     companion object {
         fun getInstance(project: Project): PixelAgentsSettings =

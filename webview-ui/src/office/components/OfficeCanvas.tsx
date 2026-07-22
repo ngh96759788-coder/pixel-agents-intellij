@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback } from 'react'
 import type { OfficeState } from '../engine/officeState.js'
 import type { EditorState } from '../editor/editorState.js'
+import { debug } from '../../debug.js'
 import type { EditorRenderState, SelectionRenderState, DeleteButtonBounds, RotateButtonBounds } from '../engine/renderer.js'
 import { startGameLoop } from '../engine/gameLoop.js'
 import { renderFrame } from '../engine/renderer.js'
@@ -26,9 +27,26 @@ interface OfficeCanvasProps {
   zoom: number
   onZoomChange: (zoom: number) => void
   panRef: React.MutableRefObject<{ x: number; y: number }>
+  /** Per-overlay always-on toggles from settings. When a flag is false the
+   *  renderer falls back to hover/select-only for that overlay. */
+  overlayDefaults: {
+    identityDot: boolean
+    tokenBar: boolean
+    status: boolean
+    tether: boolean
+  }
 }
 
-export function OfficeCanvas({ officeState, onClick, isEditMode, editorState, onEditorTileAction, onEditorEraseAction, onEditorSelectionChange, onDeleteSelected, onRotateSelected, onDragMove, editorTick: _editorTick, zoom, onZoomChange, panRef }: OfficeCanvasProps) {
+export function OfficeCanvas({ officeState, onClick, isEditMode, editorState, onEditorTileAction, onEditorEraseAction, onEditorSelectionChange, onDeleteSelected, onRotateSelected, onDragMove, editorTick: _editorTick, zoom, onZoomChange, panRef, overlayDefaults }: OfficeCanvasProps) {
+  // The game-loop render callback runs inside a useEffect closure whose
+  // deps deliberately exclude `overlayDefaults` — re-mounting the rAF loop
+  // every toggle flip would thrash the canvas. Mirror the prop into a ref
+  // so the closure always reads the fresh value without re-running the
+  // effect.
+  const overlayDefaultsRef = useRef(overlayDefaults)
+  useEffect(() => {
+    overlayDefaultsRef.current = overlayDefaults
+  }, [overlayDefaults])
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const offsetRef = useRef({ x: 0, y: 0 })
@@ -71,7 +89,7 @@ export function OfficeCanvas({ officeState, onClick, isEditMode, editorState, on
     canvas.height = Math.round(rect.height * dpr)
     canvas.style.width = `${rect.width}px`
     canvas.style.height = `${rect.height}px`
-    console.log(`[PixelAgents Canvas] css=${rect.width}x${rect.height}, backing=${canvas.width}x${canvas.height}, dpr=${dpr}, zoom=${zoom}`)
+    debug(`[PixelAgents Canvas] css=${rect.width}x${rect.height}, backing=${canvas.width}x${canvas.height}, dpr=${dpr}, zoom=${zoom}`)
     // No ctx.scale(dpr) — we render directly in device pixels
   }, [])
 
@@ -85,6 +103,48 @@ export function OfficeCanvas({ officeState, onClick, isEditMode, editorState, on
     if (containerRef.current) {
       observer.observe(containerRef.current)
     }
+
+    // DPR change watcher — runs on every webview that this canvas sits in.
+    // Two channels: (1) Kotlin tells us when the IDE detects a monitor swap or
+    // DPR change (pixel-agent:display-change CustomEvent), and (2) JS detects
+    // its own DPR transitions via matchMedia('(resolution: Ndppx)'). Both feed
+    // into resizeCanvas(), which reads the *current* window.devicePixelRatio.
+    // The matchMedia approach has to re-install after each fire because the
+    // resolution value baked into the query becomes stale.
+    let mqCleanup: (() => void) | null = null
+    const installDprWatch = () => {
+      const dpr = window.devicePixelRatio || 1
+      try {
+        const mq = window.matchMedia(`(resolution: ${dpr}dppx)`)
+        const handler = () => {
+          mqCleanup?.()
+          mqCleanup = null
+          resizeCanvas()
+          installDprWatch()
+        }
+        if (typeof mq.addEventListener === 'function') {
+          mq.addEventListener('change', handler, { once: true })
+          mqCleanup = () => mq.removeEventListener('change', handler)
+        } else {
+          // Older WebKit (unlikely in JCEF but defensive)
+          ;(mq as { addListener?: (cb: () => void) => void }).addListener?.(handler)
+          mqCleanup = () => (mq as { removeListener?: (cb: () => void) => void }).removeListener?.(handler)
+        }
+      } catch (err) {
+        // matchMedia('(resolution: ...)') is broadly supported but if it fails
+        // we still have the Kotlin-side CustomEvent + the ResizeObserver.
+        console.warn('[PixelAgents] DPR matchMedia watch unavailable', err)
+      }
+    }
+    installDprWatch()
+
+    const onDisplayChange = () => {
+      mqCleanup?.()
+      mqCleanup = null
+      resizeCanvas()
+      installDprWatch()
+    }
+    window.addEventListener('pixel-agent:display-change', onDisplayChange)
 
     const stop = startGameLoop(canvas, {
       update: (dt) => {
@@ -219,6 +279,7 @@ export function OfficeCanvas({ officeState, onClick, isEditMode, editorState, on
           officeState.getLayout().tileColors,
           officeState.getLayout().cols,
           officeState.getLayout().rows,
+          overlayDefaultsRef.current,
         )
         offsetRef.current = { x: offsetX, y: offsetY }
 
@@ -231,6 +292,8 @@ export function OfficeCanvas({ officeState, onClick, isEditMode, editorState, on
     return () => {
       stop()
       observer.disconnect()
+      mqCleanup?.()
+      window.removeEventListener('pixel-agent:display-change', onDisplayChange)
     }
   }, [officeState, resizeCanvas, isEditMode, editorState, _editorTick, zoom, panRef])
 

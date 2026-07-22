@@ -2,6 +2,12 @@
 
 VS Code extension with embedded React webview: pixel art office where AI agents (Claude Code terminals) are animated characters.
 
+> **⚠ 의도된 동작 명세는 [BEHAVIOR_SPEC.md](BEHAVIOR_SPEC.md)가 single source of truth.**
+> active/idle/despawn 임계값(서브 30s / 메인 60s), 글로벌 HUD 카운트 규칙, 통합 보기 옵션,
+> 토큰/리미트 표시, 환경별(Desktop/CLI/IntelliJ) 동작은 거기 정의돼 있다. mcp-bridge/webview
+> 동작을 수정하기 전 반드시 대조하고, 임계값을 임의로 바꾸지 마라 (과거 whack-a-mole 원인).
+> 배포는 `mcp-bridge/deploy.sh` (빌드 + Extension Dir sync) 후 Claude Desktop 완전 재시작.
+
 ## Architecture
 
 ```
@@ -227,3 +233,7 @@ All magic numbers and strings are centralized — never add inline constants to 
 6. **Do not repeat explanations** — If something was discussed before, just do it. Do not re-explain the same concepts.
 
 7. **Complete the full pipeline before reporting** — Do not show intermediate results or say "done" after partial steps. Complete the entire chain (sprite generation → animation overlay → cleanup → webview build → verification) before reporting to the user. One result, not five partial updates.
+
+8. **Use TaskCreate/TaskUpdate for any multi-step change in this project (BEHAVIOR_SPEC items, mcp-bridge fixes, webview wiring)** — Past sessions repeatedly claimed "everything is done" while actually only the easy half was applied. The fix: every spec item or fix step gets an explicit task whose state machine is `pending → in_progress → built → deployed → verified`. `verified` requires BOTH (a) the SHA of `~/Library/Application Support/Claude/Claude Extensions/local.mcpb.pixel-agents.../server/index.mjs` matches the freshly-built `mcp-bridge/server/index.mjs`, AND (b) the `office_diagnose` MCP tool returns `version` matching `package.json`. Without both, the task stays open — do not say "done".
+
+9. **Never invent threshold values** — Lifecycle/HUD/quota numbers come from BEHAVIOR_SPEC.md. If you find yourself typing `15_000`, `300_000`, `5 * 60`, etc. for these knobs, stop and re-read the spec. Every drift in this repo's history (15s/30s, 5min/10min) was a spec violation that took the user multiple rounds to catch.

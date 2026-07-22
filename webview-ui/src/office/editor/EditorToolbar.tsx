@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { EditTool } from '../types.js'
 import type { TileType as TileTypeVal, FloorColor } from '../types.js'
+import { debug } from '../../debug.js'
 import { getCatalogByCategory, buildDynamicCatalog, getActiveCategories } from '../layout/furnitureCatalog.js'
 import type { FurnitureCategory, LoadedAssetData } from '../layout/furnitureCatalog.js'
 import { getCachedSprite } from '../sprites/spriteCache.js'
@@ -97,12 +98,12 @@ function FloorPatternPreview({ patternIndex, color, selected, onClick }: {
         width: displaySize,
         height: displaySize,
         padding: 0,
-        border: selected ? '2px solid #5a8cff' : '2px solid #4a4a6a',
+        border: selected ? '2px solid #5a8cff' : '2px solid var(--pixel-border)',
         borderRadius: 0,
         cursor: 'pointer',
         overflow: 'hidden',
         flexShrink: 0,
-        background: '#2A2A3A',
+        background: 'var(--pixel-bg-inset)',
       }}
     >
       <canvas
@@ -164,16 +165,16 @@ export function EditorToolbar({
   useEffect(() => {
     if (loadedAssets) {
       try {
-        console.log(`[EditorToolbar] Building dynamic catalog with ${loadedAssets.catalog.length} assets...`)
+        debug(`[EditorToolbar] Building dynamic catalog with ${loadedAssets.catalog.length} assets...`)
         const success = buildDynamicCatalog(loadedAssets)
-        console.log(`[EditorToolbar] Catalog build result: ${success}`)
+        debug(`[EditorToolbar] Catalog build result: ${success}`)
 
         // Reset to first available category if current doesn't exist
         const activeCategories = getActiveCategories()
         if (activeCategories.length > 0) {
           const firstCat = activeCategories[0]?.id
           if (firstCat) {
-            console.log(`[EditorToolbar] Setting active category to: ${firstCat}`)
+            debug(`[EditorToolbar] Setting active category to: ${firstCat}`)
             setActiveCategory(firstCat)
           }
         }
@@ -217,14 +218,14 @@ export function EditorToolbar({
         bottom: 68,
         left: 10,
         zIndex: 50,
-        background: '#1e1e2e',
-        border: '2px solid #4a4a6a',
+        background: 'var(--pixel-bg)',
+        border: '2px solid var(--pixel-border)',
         borderRadius: 0,
         padding: '6px 8px',
         display: 'flex',
         flexDirection: 'column-reverse',
         gap: 6,
-        boxShadow: '2px 2px 0px #0a0a14',
+        boxShadow: 'var(--pixel-shadow)',
         maxWidth: 'calc(100vw - 20px)',
       }}
     >
@@ -288,8 +289,8 @@ export function EditorToolbar({
               flexDirection: 'column',
               gap: 3,
               padding: '4px 6px',
-              background: '#181828',
-              border: '2px solid #4a4a6a',
+              background: 'var(--pixel-bg-inset)',
+              border: '2px solid var(--pixel-border)',
               borderRadius: 0,
             }}>
               <ColorSlider label="H" value={floorColor.h} min={0} max={360} onChange={(v) => handleColorChange('h', v)} />
@@ -335,8 +336,8 @@ export function EditorToolbar({
               flexDirection: 'column',
               gap: 3,
               padding: '4px 6px',
-              background: '#181828',
-              border: '2px solid #4a4a6a',
+              background: 'var(--pixel-bg-inset)',
+              border: '2px solid var(--pixel-border)',
               borderRadius: 0,
             }}>
               <ColorSlider label="H" value={wallColor.h} min={0} max={360} onChange={(v) => handleWallColorChange('h', v)} />
@@ -385,8 +386,8 @@ export function EditorToolbar({
                   style={{
                     width: thumbSize,
                     height: thumbSize,
-                    background: '#2A2A3A',
-                    border: isSelected ? '2px solid #5a8cff' : '2px solid #4a4a6a',
+                    background: 'var(--pixel-bg-inset)',
+                    border: isSelected ? '2px solid #5a8cff' : '2px solid var(--pixel-border)',
                     borderRadius: 0,
                     cursor: 'pointer',
                     padding: 0,
@@ -447,8 +448,8 @@ export function EditorToolbar({
               flexDirection: 'column',
               gap: 3,
               padding: '4px 6px',
-              background: '#181828',
-              border: '2px solid #4a4a6a',
+              background: 'var(--pixel-bg-inset)',
+              border: '2px solid var(--pixel-border)',
               borderRadius: 0,
             }}>
               {effectiveColor.colorize ? (

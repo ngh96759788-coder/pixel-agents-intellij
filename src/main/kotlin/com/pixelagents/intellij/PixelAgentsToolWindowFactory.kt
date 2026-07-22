@@ -13,6 +13,7 @@ import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -62,11 +63,23 @@ class PixelAgentsPanel(
 
     val browser: JBCefBrowser
     private val bridge: WebviewBridge
+    private val timerManager: TimerManager
     private lateinit var agentManager: AgentManager
     private val fileWatcher: FileWatcher
+    private lateinit var instanceManifest: InstanceManifest
+    private var displayWatcher: DisplayChangeWatcher? = null
+    /** Last URL passed to JCEF — kept so we can reload with a fresh cache-buster
+     *  on display change without rebuilding the path from scratch. */
+    @Volatile private var lastLoadedUrl: String? = null
+    /** Last `active` value pushed to the webview. The ToolWindowManagerListener
+     *  fires on EVERY tool window in the project (Project view, Terminal, etc.),
+     *  so without this guard we'd spam executeJavaScript with redundant events. */
+    @Volatile private var lastNotifiedActive: Boolean? = null
     private val assetLoader = AssetLoader()
     private val layoutPersistence = LayoutPersistence(project.basePath)
     private lateinit var terminalDetector: TerminalDetector
+    private var worktreeDetector: WorktreeDetector? = null
+    private var quotaTracker: QuotaWindowTracker? = null
     private val settings = PixelAgentsSettings.getInstance(project)
     private val gson = Gson()
 
@@ -79,8 +92,11 @@ class PixelAgentsPanel(
     var activeAgentId: Int? = null
 
     private var webviewDir: File? = null
-    private var assetsDir: File? = null
+    @Volatile private var assetsDir: File? = null
     private val assetLoadLock = Object() // Prevents race between loadAndSendAssets and setTheme
+    /** True after first onWebviewReady. Subsequent webview reloads only resync state — they
+     *  must NOT spawn new schedulers, periodic discoveries, or terminal detectors. */
+    private val infrastructureStarted = java.util.concurrent.atomic.AtomicBoolean(false)
 
     init {
         LOG.info("Initializing PixelAgentsPanel")
@@ -90,10 +106,51 @@ class PixelAgentsPanel(
             handleWebviewMessage(message)
         }
 
-        val timerManager = TimerManager(
+        timerManager = TimerManager(
             sendToWebview = { type, payload -> bridge.sendToWebview(type, payload) },
             agents = agents,
         )
+
+        instanceManifest = InstanceManifest()
+        instanceManifest.start()
+
+        // After laptop suspend/resume, the heartbeat thread may not fire for a
+        // while, leaving us looking dead to peers. Hook the IDE's "frame
+        // activated" event so we re-stamp our heartbeat the moment the user
+        // touches the IDE again. Cheap and closes the wake-up race window.
+        try {
+            val connection = ApplicationManager.getApplication().messageBus.connect(this)
+            connection.subscribe(
+                com.intellij.openapi.application.ApplicationActivationListener.TOPIC,
+                object : com.intellij.openapi.application.ApplicationActivationListener {
+                    override fun applicationActivated(ideFrame: com.intellij.openapi.wm.IdeFrame) {
+                        instanceManifest.touchHeartbeat()
+                    }
+                },
+            )
+        } catch (e: Exception) {
+            LOG.warn("Failed to register activation listener for manifest heartbeat", e)
+        }
+
+        // Tool-window visibility bridge: when the user collapses the Pixel
+        // Agents tool window or switches to a different one, push a
+        // pixel-agent:set-active=false event into the webview so its gameLoop
+        // can pause. Resume when visible again. Saves CPU + reduces the
+        // window where a frozen JCEF compositor matters.
+        try {
+            val projectBus = project.messageBus.connect(this)
+            projectBus.subscribe(
+                com.intellij.openapi.wm.ex.ToolWindowManagerListener.TOPIC,
+                object : com.intellij.openapi.wm.ex.ToolWindowManagerListener {
+                    override fun stateChanged(toolWindowManager: com.intellij.openapi.wm.ToolWindowManager) {
+                        val tw = toolWindowManager.getToolWindow("Pixel Agents") ?: return
+                        notifyActiveToJs(tw.isVisible)
+                    }
+                },
+            )
+        } catch (e: Exception) {
+            LOG.warn("Failed to register tool window visibility listener", e)
+        }
 
         fileWatcher = FileWatcher(
             sendToWebview = { type, payload -> bridge.sendToWebview(type, payload) },
@@ -103,6 +160,7 @@ class PixelAgentsPanel(
             onNewAgentFile = null,
             persistAgents = { agentManager.persistAgents() },
             timerManager = timerManager,
+            instanceManifest = instanceManifest,
         )
 
         agentManager = AgentManager(
@@ -116,12 +174,19 @@ class PixelAgentsPanel(
             sendToWebview = { type, payload -> bridge.sendToWebview(type, payload) },
             fileWatcher = fileWatcher,
             settings = settings,
+            instanceManifest = instanceManifest,
         )
 
-        // Wire up terminal adoption callback now that agentManager is initialized
-        fileWatcher.onNewAgentFile = { jsonlFilePath ->
-            agentManager.adoptAgent(jsonlFilePath)
-        }
+        // Adopt unowned JSONLs (e.g. user typed `claude` directly in this
+        // window's terminal) as own agents. Peer-owned sessions are filtered
+        // upstream in FileWatcher so we never accidentally claim work that
+        // belongs to another IDE window.
+        fileWatcher.onNewAgentFile = { path -> agentManager.adoptAgent(path) }
+        // Unified view (BEHAVIOR_SPEC §4): sessions discovered outside this
+        // window's own project/worktree dirs are adopted as EXTERNAL (faded)
+        // agents. Only ever fires while the toggle is ON (external discovery
+        // timer is stopped otherwise).
+        fileWatcher.onExternalAgentFile = { path -> agentManager.adoptExternalAgent(path) }
         // Clean up orphaned async sub-agents when their file watcher times out
         fileWatcher.onSubagentTimeout = { agentId, parentToolId ->
             agentManager.clearOrphanedSubagent(agentId, parentToolId)
@@ -138,11 +203,72 @@ class PixelAgentsPanel(
                 .defaultScreenDevice.defaultConfiguration.defaultTransform.scaleX
             val url = "${indexFile.toURI()}?dpr=$osScale&_cb=${System.currentTimeMillis()}"
             LOG.info("Loading webview from: $url (OS DPR=$osScale)")
+            lastLoadedUrl = url
             browser.loadURL(url)
+
+            // Reload the webview when the user drags the IDE window to a different
+            // monitor or unplugs/replugs a display. JCEF OSR caches a backbuffer at
+            // the DPR of the GraphicsConfiguration it was created on; a fresh load
+            // is the simplest way to make it pick up the new DPR. We also tell the
+            // JS side via a CustomEvent so the canvas can resize immediately
+            // (without waiting for the reload round trip) for the common case
+            // where the JCEF backbuffer is still usable.
+            displayWatcher = DisplayChangeWatcher(browser.component) { _ ->
+                notifyDprChangeToJs()
+                reloadWebview()
+            }
+            displayWatcher?.start()
         } else {
             LOG.warn("Failed to extract webview resources, showing error page")
             browser.loadHTML("<html><body><h1>Failed to load Pixel Agents webview</h1></body></html>")
         }
+    }
+
+    /** Push a tool-window visibility hint into the webview. gameLoop pauses
+     *  while inactive, saving CPU when the user has the panel collapsed. */
+    private fun notifyActiveToJs(active: Boolean) {
+        if (lastNotifiedActive == active) return
+        lastNotifiedActive = active
+        try {
+            val js = "window.dispatchEvent(new CustomEvent('pixel-agent:set-active',{detail:{active:$active}}));"
+            browser.cefBrowser.executeJavaScript(js, browser.cefBrowser.url, 0)
+        } catch (e: Exception) {
+            LOG.warn("notifyActiveToJs failed", e)
+        }
+    }
+
+    /** Push a CustomEvent into the webview so the canvas + overlays can rescale
+     *  to the new devicePixelRatio without waiting for a full reload. The JS
+     *  side reads `window.devicePixelRatio` directly at handler time. */
+    private fun notifyDprChangeToJs() {
+        try {
+            val js = "window.dispatchEvent(new CustomEvent('pixel-agent:display-change',{detail:{ts:${System.currentTimeMillis()}}}));"
+            browser.cefBrowser.executeJavaScript(js, browser.cefBrowser.url, 0)
+        } catch (e: Exception) {
+            LOG.warn("notifyDprChangeToJs failed", e)
+        }
+    }
+
+    /** Recompute the OS DPR and reload the webview with a fresh cache-buster.
+     *  Re-binds JCEF OSR to the current GraphicsConfiguration so its backbuffer
+     *  picks up the new DPR. */
+    private fun reloadWebview() {
+        val baseUrl = lastLoadedUrl ?: return
+        ApplicationManager.getApplication().invokeLater({
+            try {
+                val osScale = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
+                    .defaultScreenDevice.defaultConfiguration.defaultTransform.scaleX
+                // Strip any prior query and rebuild — the URL fragment holds the path,
+                // we just refresh the dpr + cache buster.
+                val base = baseUrl.substringBefore('?')
+                val url = "$base?dpr=$osScale&_cb=${System.currentTimeMillis()}"
+                lastLoadedUrl = url
+                LOG.info("Reloading webview after display change: dpr=$osScale")
+                browser.loadURL(url)
+            } catch (e: Exception) {
+                LOG.warn("reloadWebview failed", e)
+            }
+        }, com.intellij.openapi.application.ModalityState.any())
     }
 
     private fun extractWebviewResources(): File? {
@@ -247,6 +373,68 @@ class PixelAgentsPanel(
                 val enabled = message["enabled"] as? Boolean ?: true
                 settings.soundEnabled = enabled
             }
+            "setSharedLayoutAcrossProjects" -> {
+                // Toggles the cross-project layout sharing switch.
+                // - OFF (default): each IntelliJ project has its own scope
+                //   dir, so layouts/themes don't stomp each other.
+                // - ON: every project reads/writes ~/.pixel-agents/shared/…
+                //   so changes propagate across all open IntelliJ windows.
+                // When flipping ON for the first time, migrate the project's
+                // current layout into the shared scope (only if shared is
+                // empty) so the user doesn't see an unexpected blank office.
+                val enabled = message["enabled"] as? Boolean ?: false
+                val app = PixelAgentsAppSettings.getInstance()
+                if (app.sharedLayoutAcrossProjects == enabled) return
+
+                val previousLayout = layoutPersistence.readLayoutFromFile()
+                app.sharedLayoutAcrossProjects = enabled
+                layoutPersistence.refreshAfterScopeChange()
+
+                val newScopeLayout = layoutPersistence.readLayoutFromFile()
+                val finalLayout = if (newScopeLayout == null && previousLayout != null) {
+                    // New scope is empty — seed it with the previous one so
+                    // the visible office doesn't go blank on toggle.
+                    layoutPersistence.markOwnWrite()
+                    layoutPersistence.writeLayoutToFile(previousLayout)
+                    previousLayout
+                } else {
+                    newScopeLayout
+                }
+
+                if (finalLayout != null) {
+                    bridge.sendToWebview("layoutLoaded", mapOf("layout" to finalLayout))
+                }
+            }
+            "setUnifiedView" -> {
+                // BEHAVIOR_SPEC §4 "통합 보기" toggle.
+                // - ON:  start periodic external discovery so peer / foreign
+                //        ~/.claude/projects sessions surface as faded agents.
+                // - OFF: stop discovery and close every external agent already
+                //        adopted (no terminal is killed — externals have none),
+                //        then resync so the webview drops them.
+                val enabled = message["enabled"] as? Boolean ?: false
+                PixelAgentsAppSettings.getInstance().unifiedView = enabled
+                if (enabled) {
+                    startExternalDiscovery()
+                } else {
+                    fileWatcher.stopExternalDiscovery()
+                    agentManager.closeAllExternalAgents()
+                }
+                agentManager.sendExistingAgents()
+            }
+            "setOverlayDefault" -> {
+                // Single message dispatches the 4 always-on overlay toggles.
+                // Webview sends { kind: 'identityDot' | 'tokenBar' | 'status' | 'tether', enabled: Boolean }.
+                val kind = message["kind"] as? String ?: return
+                val enabled = message["enabled"] as? Boolean ?: false
+                when (kind) {
+                    "identityDot" -> settings.alwaysShowIdentityDot = enabled
+                    "tokenBar" -> settings.alwaysShowTokenBar = enabled
+                    "status" -> settings.alwaysShowStatus = enabled
+                    "tether" -> settings.alwaysShowTether = enabled
+                    else -> LOG.warn("Unknown overlay toggle kind: $kind")
+                }
+            }
             "openSessionsFolder" -> {
                 agentManager.openSessionsFolder()
             }
@@ -286,8 +474,11 @@ class PixelAgentsPanel(
                 settings.theme = validTheme
 
                 // 3. Reload all themed assets on background thread
-                val dir = assetsDir
-                if (dir != null) {
+                // Fallback: if initial loadAndSendAssets hasn't completed yet (rare), retry the lookup.
+                val dir = assetsDir ?: findAssetsDirectory()?.also { this.assetsDir = it }
+                if (dir == null) {
+                    LOG.warn("setTheme: assets directory not available — visual theme will not update until reload. settings.theme is still persisted as $validTheme.")
+                } else {
                     ApplicationManager.getApplication().executeOnPooledThread {
                         synchronized(assetLoadLock) {
                             val charSubdir = Constants.THEME_CHAR_DIRS[validTheme] ?: "characters"
@@ -345,20 +536,50 @@ class PixelAgentsPanel(
         }
     }
 
+    /** Kick off unified-view external discovery over ~/.claude/projects.
+     *  Idempotent — FileWatcher no-ops if a discovery timer is already running. */
+    private fun startExternalDiscovery() {
+        val root = Paths.get(System.getProperty("user.home"), ".claude", "projects").toString()
+        fileWatcher.startExternalDiscovery(root)
+    }
+
     private fun onWebviewReady() {
+        // Steps 1, 3, 5: state resync — safe to repeat on every webview reload.
         // 1. Send settings
         bridge.sendToWebview("settingsLoaded", mapOf(
             "soundEnabled" to settings.soundEnabled,
             "theme" to settings.theme,
+            "alwaysShowIdentityDot" to settings.alwaysShowIdentityDot,
+            "alwaysShowTokenBar" to settings.alwaysShowTokenBar,
+            "alwaysShowStatus" to settings.alwaysShowStatus,
+            "alwaysShowTether" to settings.alwaysShowTether,
+            "sharedLayoutAcrossProjects" to PixelAgentsAppSettings.getInstance().sharedLayoutAcrossProjects,
+            "unifiedView" to PixelAgentsAppSettings.getInstance().unifiedView,
         ))
-
-        // 2. Start fresh — don't restore persisted agents. Characters appear
-        //    only when "+" is clicked or Claude terminal activity is detected.
 
         // 3. Load and send assets (on background thread)
         ApplicationManager.getApplication().executeOnPooledThread {
             loadAndSendAssets()
         }
+
+        // 5. Send existing agents (empty on fresh start; fileWatcher may adopt running terminals)
+        agentManager.sendExistingAgents()
+
+        // Refresh the 5h token HUD immediately on webview (re)load — a fresh
+        // webview starts at 0 and would otherwise wait up to a minute for the
+        // next scheduled tick. No-op before infrastructure start.
+        quotaTracker?.pushNow()
+
+        // Infrastructure (steps 4, 6, 7, 8) — start ONCE per IDE session. JCEF can fire
+        // webviewReady multiple times (panel toggle, IDE repaint), and re-running these
+        // would leak schedulers, file watchers, and TerminalDetector instances each time.
+        if (!infrastructureStarted.compareAndSet(false, true)) return
+
+        // 3a. Rolling 5h token-usage HUD (BEHAVIOR_SPEC §3): scan
+        // ~/.claude/projects JSONL usage once a minute, push absolute tokens.
+        quotaTracker = QuotaWindowTracker { type, payload ->
+            bridge.sendToWebview(type, payload)
+        }.also { it.start() }
 
         // 4. Start project scan (detects running Claude terminals)
         val projectDir = agentManager.getProjectDirPath()
@@ -366,8 +587,41 @@ class PixelAgentsPanel(
             fileWatcher.ensureProjectScan(projectDir)
         }
 
-        // 5. Send existing agents (empty on fresh start; fileWatcher may adopt running terminals)
-        agentManager.sendExistingAgents()
+        // 4a. Watch git worktrees of THIS repo (IntelliJ 2026.1 hands tasks off
+        //     to agents running in worktrees, whose cwd → a different Claude
+        //     project-hash dir than basePath). Scoped to the open repo only —
+        //     NOT the global cross-project discovery disabled in 4b. Worktree
+        //     dirs are registered as `trusted` so adoption skips the
+        //     process-ancestry check (handed-off agents may run detached) while
+        //     peer-ownership still guards against cross-window duplicates.
+        worktreeDetector = WorktreeDetector(
+            basePath = project.basePath,
+            projectDirForCwd = { cwd -> agentManager.getProjectDirPath(cwd) },
+            onWorktreeProjectDir = { dir, _, branch ->
+                fileWatcher.ensureProjectScan(dir, trusted = true)
+                if (branch != null) fileWatcher.registerWorktreeBranch(dir, branch)
+            },
+        ).also { it.start() }
+
+        // 4b. Cross-project discovery is intentionally OFF. The previous
+        //     implementation iterated every subdir of ~/.claude/projects/ and
+        //     spun up a scanner for any with recent activity — which meant the
+        //     pixel-agents window happily adopted JSONLs from totally
+        //     unrelated projects (e.g. a billing-backend session running in
+        //     another IntelliJ window). `hasOwnClaudeDescendant` only proves
+        //     *some* claude is descendant of this IDE, not that THIS JSONL is
+        //     written by it, so it lets the foreign sessions through. Sticking
+        //     to the IDE basePath project + instance manifest peer-ownership
+        //     is the per-window-isolated behavior the user actually wants.
+
+        // 4c. Unified view (BEHAVIOR_SPEC §4): the toggle-gated re-enablement of
+        //     cross-project discovery from 4b. When the persisted setting is ON,
+        //     start external discovery now that the own-project (step 4) and
+        //     worktree (step 4a) scanners are registered — they define the dirs
+        //     external discovery must SKIP (their sessions stay normal/opaque).
+        if (PixelAgentsAppSettings.getInstance().unifiedView) {
+            startExternalDiscovery()
+        }
 
         // 6. Start layout watcher
         layoutPersistence.startWatching { layout ->
@@ -380,6 +634,13 @@ class PixelAgentsPanel(
             onTerminalClosed = { name -> agentManager.onTerminalClosed(name) },
         )
         terminalDetector.startScanning()
+
+        // Note: Claude Desktop activity is intentionally NOT mirrored into
+        // this IntelliJ window. Each surface (IDE plugin, future standalone
+        // app, the MCP-bridge browser view) owns its own office and only
+        // shows the agents born in that surface. The mcp-bridge module
+        // serves Claude Desktop's office to a localhost browser tab; this
+        // window only renders Claude Code work from ~/.claude/projects.
 
         // 8. Start session alive check (removes agents when Claude process exits)
         agentManager.startSessionAliveCheck()
@@ -476,10 +737,19 @@ class PixelAgentsPanel(
     }
 
     override fun dispose() {
+        displayWatcher?.dispose()
         if (::terminalDetector.isInitialized) terminalDetector.dispose()
+        worktreeDetector?.dispose()
+        quotaTracker?.dispose()
+        if (::instanceManifest.isInitialized) instanceManifest.stop()
         layoutPersistence.dispose()
         fileWatcher.dispose()
         agentManager.dispose()
+        timerManager.dispose()
         bridge.dispose()
+        // Dispose the JCEF browser LAST — after bridge.dispose() has torn down
+        // its JBCefJSQuery (which holds a handle into this browser). Without
+        // this, each tool-window recreation leaks an off-heap Chromium renderer.
+        browser.dispose()
     }
 }

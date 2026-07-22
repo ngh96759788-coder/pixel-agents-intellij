@@ -76,11 +76,14 @@ export function createCharacter(
     seatTimer: 0,
     idleTimer: 0,
     isSubagent: false,
+    isExternal: false,
     isCompleted: false,
     parentAgentId: null,
     matrixEffect: null,
     matrixEffectTimer: 0,
     matrixEffectSeeds: [],
+    contextTokens: -1,
+    contextTokensUpdatedAt: 0,
   }
 }
 

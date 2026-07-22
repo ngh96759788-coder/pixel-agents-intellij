@@ -1,5 +1,10 @@
 import type { SpriteData } from '../types.js'
 
+// LRU on zoom-level keys so users who toggle through many zooms (or
+// trigger a DPR-driven zoom shift on display change) don't accumulate
+// canvas sets indefinitely. Sprite-level eviction is already automatic
+// via the inner WeakMap.
+const MAX_ZOOM_CACHES = 3
 const zoomCaches = new Map<number, WeakMap<SpriteData, HTMLCanvasElement>>()
 
 // ── Outline sprite generation ─────────────────────────────────
@@ -50,6 +55,17 @@ export function getCachedSprite(sprite: SpriteData, zoom: number): HTMLCanvasEle
   if (!cache) {
     cache = new WeakMap()
     zoomCaches.set(zoom, cache)
+    // Evict oldest zoom keys when over the cap. Map preserves insertion
+    // order so the first key is the least-recently-added.
+    while (zoomCaches.size > MAX_ZOOM_CACHES) {
+      const oldest = zoomCaches.keys().next().value
+      if (oldest === undefined) break
+      zoomCaches.delete(oldest)
+    }
+  } else {
+    // Bump this zoom key to "most recently used" by re-inserting it.
+    zoomCaches.delete(zoom)
+    zoomCaches.set(zoom, cache)
   }
 
   const cached = cache.get(sprite)
@@ -74,4 +90,11 @@ export function getCachedSprite(sprite: SpriteData, zoom: number): HTMLCanvasEle
 
   cache.set(sprite, canvas)
   return canvas
+}
+
+/** Drop every cached canvas. Called on display-change events (DPR
+ *  shifts under the same logical zoom level produce wrong-size
+ *  canvases otherwise) and after a JCEF context restore. */
+export function clearSpriteCache(): void {
+  zoomCaches.clear()
 }

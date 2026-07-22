@@ -89,8 +89,7 @@ class WebviewBridge(
         val message = payload.toMutableMap()
         message["type"] = type
         val json = gson.toJson(message)
-        val jsonLen = json.length
-        println("[WebviewBridge] sendToWebview type=$type jsonLen=$jsonLen")
+        if (LOG.isDebugEnabled) LOG.debug("sendToWebview type=$type jsonLen=${json.length}")
         ApplicationManager.getApplication().invokeLater {
             try {
                 browser.cefBrowser.executeJavaScript(
@@ -98,7 +97,7 @@ class WebviewBridge(
                     browser.cefBrowser.url, 0
                 )
             } catch (e: Exception) {
-                println("[WebviewBridge] executeJavaScript FAILED for type=$type: $e")
+                LOG.warn("executeJavaScript failed for type=$type", e)
             }
         }
     }

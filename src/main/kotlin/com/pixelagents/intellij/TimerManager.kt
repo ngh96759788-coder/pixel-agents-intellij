@@ -20,10 +20,20 @@ class TimerManager(
         agent.activeToolIds.clear()
         agent.activeToolStatuses.clear()
         agent.activeToolNames.clear()
+        // Reset background-Bash exemptions too: a new user prompt (or /clear)
+        // starts a fresh turn, and a stale exemption would make the agent
+        // immortal in checkDeadSessions if the tool_result never arrives
+        // (Ctrl+C, /clear file swap). If the background shell IS still
+        // running, its bash_progress writes keep the JSONL fresh anyway.
+        agent.backgroundToolIds.clear()
         agent.activeSubagentToolIds.clear()
         agent.activeSubagentToolNames.clear()
+        // Clear queued sub-agent parent IDs so a sub-JSONL appearing after
+        // /clear can't be mis-bound to a parentToolId from the previous session.
+        agent.pendingSubagentIds.clear()
         agent.isWaiting = false
         agent.permissionSent = false
+        agent.hadToolsInTurn = false
         cancelPermissionTimer(agentId)
         sendToWebview("agentToolsClear", mapOf("id" to agentId))
         sendToWebview("agentStatus", mapOf("id" to agentId, "status" to "active"))

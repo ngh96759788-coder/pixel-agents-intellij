@@ -2,12 +2,17 @@ package com.pixelagents.intellij
 
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.intellij.openapi.diagnostic.Logger
 import java.awt.image.BufferedImage
 import java.io.File
 import java.io.InputStream
 import javax.imageio.ImageIO
 
 class AssetLoader {
+
+    companion object {
+        private val LOG = Logger.getInstance(AssetLoader::class.java)
+    }
 
     private val gson = Gson()
     var defaultLayout: Map<String, Any?>? = null
@@ -82,16 +87,16 @@ class AssetLoader {
         try {
             val layoutFile = File(assetsDir, layoutFilename)
             if (!layoutFile.exists()) {
-                println("[AssetLoader] No default-layout.json found at: ${layoutFile.absolutePath}")
+                LOG.warn("No default-layout.json found at: ${layoutFile.absolutePath}")
                 return null
             }
             val content = layoutFile.readText()
             @Suppress("UNCHECKED_CAST")
             val layout = gson.fromJson(content, Map::class.java) as Map<String, Any?>
-            println("[AssetLoader] Loaded default layout")
+            LOG.info("Loaded default layout")
             return layout
         } catch (e: Exception) {
-            println("[AssetLoader] Error loading default layout: $e")
+            LOG.warn("loading default layout", e)
             return null
         }
     }
@@ -110,14 +115,21 @@ class AssetLoader {
             }
             val charCount = ci
             if (charCount == 0) {
-                println("[AssetLoader] No character sprites found in: ${charDir.absolutePath}")
+                LOG.info("No character sprites found in: ${charDir.absolutePath}")
                 return null
             }
 
-            for (ci in 0 until charCount) {
-                val file = File(charDir, "char_$ci.png")
+            for (charIdx in 0 until charCount) {
+                val file = File(charDir, "char_$charIdx.png")
 
+                // ImageIO.read returns null (not throws) for unrecognized/corrupt PNGs.
+                // Without this guard, a broken theme PNG crashes the whole asset load
+                // and no characters ever appear in the webview (sleuth H3).
                 val img = ImageIO.read(file)
+                if (img == null) {
+                    LOG.warn("Invalid character PNG, skipping: ${file.absolutePath}")
+                    continue
+                }
                 val charData = mutableMapOf<String, Any>()
 
                 for ((dirIdx, dir) in Constants.CHARACTER_DIRECTIONS.withIndex()) {
@@ -137,10 +149,10 @@ class AssetLoader {
                 characters.add(charData)
             }
 
-            println("[AssetLoader] Loaded ${characters.size} character sprites")
+            LOG.info("Loaded ${characters.size} character sprites")
             return characters
         } catch (e: Exception) {
-            println("[AssetLoader] Error loading character sprites: $e")
+            LOG.warn("loading character sprites", e)
             return null
         }
     }
@@ -149,11 +161,14 @@ class AssetLoader {
         try {
             val floorFile = File(assetsDir, floorFilename)
             if (!floorFile.exists()) {
-                println("[AssetLoader] No floors.png found")
+                LOG.warn("No floors.png found")
                 return null
             }
 
-            val img = ImageIO.read(floorFile)
+            val img = ImageIO.read(floorFile) ?: run {
+                LOG.warn("Invalid floors PNG, skipping: ${floorFile.absolutePath}")
+                return null
+            }
             val sprites = mutableListOf<List<List<String>>>()
 
             for (t in 0 until Constants.FLOOR_PATTERN_COUNT) {
@@ -164,10 +179,10 @@ class AssetLoader {
                 sprites.add(sprite)
             }
 
-            println("[AssetLoader] Loaded ${sprites.size} floor tile patterns")
+            LOG.info("Loaded ${sprites.size} floor tile patterns")
             return sprites
         } catch (e: Exception) {
-            println("[AssetLoader] Error loading floor tiles: $e")
+            LOG.warn("loading floor tiles", e)
             return null
         }
     }
@@ -176,11 +191,14 @@ class AssetLoader {
         try {
             val wallFile = File(assetsDir, wallFilename)
             if (!wallFile.exists()) {
-                println("[AssetLoader] No walls.png found")
+                LOG.warn("No walls.png found")
                 return null
             }
 
-            val img = ImageIO.read(wallFile)
+            val img = ImageIO.read(wallFile) ?: run {
+                LOG.warn("Invalid walls PNG, skipping: ${wallFile.absolutePath}")
+                return null
+            }
             val sprites = mutableListOf<List<List<String>>>()
 
             for (mask in 0 until Constants.WALL_BITMASK_COUNT) {
@@ -193,10 +211,10 @@ class AssetLoader {
                 sprites.add(sprite)
             }
 
-            println("[AssetLoader] Loaded ${sprites.size} wall tile pieces")
+            LOG.info("Loaded ${sprites.size} wall tile pieces")
             return sprites
         } catch (e: Exception) {
-            println("[AssetLoader] Error loading wall tiles: $e")
+            LOG.warn("loading wall tiles", e)
             return null
         }
     }
@@ -208,15 +226,15 @@ class AssetLoader {
             val catalogFile = File(assetsDir, "$effectiveDir/furniture-catalog.json")
             if (!catalogFile.exists()) {
                 if (effectiveDir != "furniture") {
-                    println("[AssetLoader] No furniture catalog for theme dir '$effectiveDir', falling back to 'furniture'")
+                    LOG.info("No furniture catalog for theme dir '$effectiveDir', falling back to 'furniture'")
                     effectiveDir = "furniture"
                     val fallbackCatalog = File(assetsDir, "$effectiveDir/furniture-catalog.json")
                     if (!fallbackCatalog.exists()) {
-                        println("[AssetLoader] No furniture catalog found at: ${fallbackCatalog.absolutePath}")
+                        LOG.info("No furniture catalog found at: ${fallbackCatalog.absolutePath}")
                         return null
                     }
                 } else {
-                    println("[AssetLoader] No furniture catalog found at: ${catalogFile.absolutePath}")
+                    LOG.info("No furniture catalog found at: ${catalogFile.absolutePath}")
                     return null
                 }
             }
@@ -241,22 +259,26 @@ class AssetLoader {
                     // assetsDir is the 'assets' folder, so we need to go up one level
                     val assetFile = File(assetsDir.parentFile, filePath)
                     if (!assetFile.exists()) {
-                        println("[AssetLoader] Asset file not found: $filePath")
+                        LOG.info("Asset file not found: $filePath")
                         continue
                     }
 
                     val img = ImageIO.read(assetFile)
+                    if (img == null) {
+                        LOG.warn("Invalid furniture PNG, skipping: ${assetFile.absolutePath}")
+                        continue
+                    }
                     val spriteData = imageRegionToSpriteData(img, 0, 0, width, height)
                     sprites[id] = spriteData
                 } catch (e: Exception) {
-                    println("[AssetLoader] Error loading furniture asset: $e")
+                    LOG.warn("loading furniture asset", e)
                 }
             }
 
-            println("[AssetLoader] Loaded ${sprites.size} / ${catalog.size} furniture assets")
+            LOG.info("Loaded ${sprites.size} / ${catalog.size} furniture assets")
             return mapOf("catalog" to catalog, "sprites" to sprites)
         } catch (e: Exception) {
-            println("[AssetLoader] Error loading furniture assets: $e")
+            LOG.warn("loading furniture assets", e)
             return null
         }
     }

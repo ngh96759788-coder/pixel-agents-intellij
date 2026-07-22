@@ -94,13 +94,14 @@ export function DebugView({
               borderRadius: 0,
               padding: '6px 8px',
               fontSize: '26px',
-              opacity: 0.7,
               background: isSelected ? 'rgba(90, 140, 255, 0.25)' : undefined,
-              color: isSelected ? '#fff' : undefined,
+              // × (U+00D7) + shared close vars — ✕ (U+2715) is not in FS
+              // Pixel Sans' cmap and rendered in the OS fallback font.
+              color: isSelected ? '#fff' : 'var(--pixel-close-text)',
             }}
             title="Close agent"
           >
-            ✕
+            ×
           </button>
         </span>
         {(tools.length > 0 || status === 'waiting') && (

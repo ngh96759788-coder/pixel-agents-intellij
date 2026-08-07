@@ -2,6 +2,12 @@
 
 ## 1.0.5 (+ mcp-bridge 0.8.6)
 
+### IDE 호환 범위 (마켓플레이스 delist 대응)
+- **`until-build` 상한 제거** — 마켓플레이스에 올라가 있던 1.0.0~1.0.2가 `until-build = 253.*`라서 IDE 262(2026.2) 사용자에게 노출되지 않던 문제. `gradle.properties`의 `untilBuild`를 비우면 `provider { null }`로 속성 자체가 빠지며, 값을 넣으면 다시 상한이 걸린다
+- **verifier 대상에 Ultimate 2026.2 추가** — IntelliJ IDEA **Community는 2025.3(빌드 253)이 마지막**이라 `recommended()`만으로는 261/262를 아예 검증할 수 없었음. `ide(IntellijIdeaUltimate, "2026.2")`를 명시해 실제 사용자 빌드를 검증 대상에 포함
+- **IntelliJ Platform Gradle Plugin 2.2.1 → 2.9.0** — 2.12.0부터 Gradle 9를 요구하므로 현재 래퍼(8.10)에서 쓸 수 있는 최신 계열로 상향
+- **루트 `npm run build` 복구** — 루트 `tsconfig.json`이 나중에 추가된 `mcp-bridge/`(자체 tsconfig 보유)를 제외하지 않아 `check-types`가 `TS6059 rootDir`로 실패하던 것을 수정. CI의 빌드 단계도 같은 이유로 깨져 있었음
+
 ### Claude 5 패밀리 / 신규 모델 대응
 - **모델 칩** — `claude-fable-5` → `FABLE 5`(뮤트 틸), `claude-mythos-5` → `MYTH 5`, `claude-opus-4-8` → `OPUS 4.8`, `claude-sonnet-5` → `SON 5`. 기존엔 Fable/Mythos 세션이 회색 폴백 칩(`FAB`)으로 표시됐음
 - **컨텍스트 윈도우 스케일** — Fable 5 / Mythos 5 / Sonnet 5 / Sonnet 4.6 → 1M (HP 게이지·HUD % 정확화). webview + mcp-bridge 양쪽 (`usage.ts` × 2)

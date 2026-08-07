@@ -48,6 +48,38 @@
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>1.0.5</h3>
+<p><b>Compatibility</b></p>
+<ul>
+  <li>Removed the <code>until-build</code> upper bound &mdash; the plugin now stays available on new IDE releases (2026.2 / build 262 and later) instead of being delisted</li>
+</ul>
+<p><b>New Claude models</b></p>
+<ul>
+  <li>Model chips for the Claude 5 family: <code>FABLE 5</code>, <code>MYTH 5</code>, <code>SON 5</code>, <code>OPUS 4.8</code> (previously fell back to a grey unknown chip)</li>
+  <li>Context-window scale corrected to 1M for Fable 5 / Mythos 5 / Sonnet 5 / Sonnet 4.6, so the HP gauge and HUD percentage are accurate</li>
+  <li>Updated cost table (Opus $5/$25, Haiku 4.5 $1/$5, Fable &amp; Mythos $10/$50)</li>
+</ul>
+<p><b>Behavior fixes</b></p>
+<ul>
+  <li>Background <code>Bash</code> tasks keep their character active after the turn ends, instead of going idle while the command still runs</li>
+  <li>Sub-agent watchers now time out at 30s (they were reusing the 60s main-agent threshold)</li>
+  <li>5-hour token usage chip in the HUD now actually populates on IntelliJ (the backend never sent the data before)</li>
+</ul>
+<p><b>Unified view</b></p>
+<ul>
+  <li>New <i>Unified View (Show Other Sources)</i> setting, off by default. When enabled, agents from other IDE windows and CLI sessions appear at 85% transparency alongside your own</li>
+</ul>
+<p><b>UI polish</b></p>
+<ul>
+  <li>Replaced glyphs the pixel font could not render (which fell back to OS emoji), unified the close button across panels, and pixelated the native sliders/checkboxes in the layout editor</li>
+</ul>
+
+<h3>1.0.4</h3>
+<ul>
+  <li><b>Git worktree support</b> &mdash; Claude sessions running in a worktree of the open repository now show up in the same office. Worktrees created while the IDE is running are picked up within 5s, no restart needed</li>
+  <li>Agents adopted from a worktree carry a <code>&#8627;branch</code> suffix on their label, persisted across IDE restarts</li>
+</ul>
+
 <h3>1.0.3</h3>
 <p><b>UX</b></p>
 <ul>

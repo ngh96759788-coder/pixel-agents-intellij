@@ -1,7 +1,9 @@
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
+
 plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "1.9.25"
-    id("org.jetbrains.intellij.platform") version "2.2.1"
+    id("org.jetbrains.intellij.platform") version "2.9.0"
 }
 
 group = providers.gradleProperty("pluginGroup").get()
@@ -44,7 +46,16 @@ intellijPlatform {
         version = providers.gradleProperty("pluginVersion")
         ideaVersion {
             sinceBuild = providers.gradleProperty("sinceBuild")
-            untilBuild = providers.gradleProperty("untilBuild")
+            // A blank `untilBuild` property drops the attribute entirely, which is
+            // what keeps the plugin listed on new IDE releases. `provider { null }`
+            // is the documented way to unset it; assigning the property directly
+            // would fall back to the plugin's default upper bound instead.
+            val untilBuildProperty = providers.gradleProperty("untilBuild").getOrElse("").trim()
+            untilBuild = if (untilBuildProperty.isEmpty()) {
+                provider { null }
+            } else {
+                provider { untilBuildProperty }
+            }
         }
     }
 
@@ -66,7 +77,19 @@ intellijPlatform {
     // the build, while structural / scheduled-for-removal issues do fail.
     pluginVerification {
         ides {
-            recommended()
+            // Explicit list rather than `recommended()`: that helper resolves
+            // Community only, and it offers ideaIC-2025.3, which JetBrains never
+            // published as a downloadable distribution (404) — so the whole task
+            // failed to resolve. Community ends at 2025.2.6; 261+ ships as
+            // Ultimate only, which is where the users hitting build 262 are.
+            // IntellijIdeaCommunity is deprecated as a target but is still the only
+            // way to check the 242/252 floor the plugin claims to support.
+            @Suppress("DEPRECATION")
+            create(IntelliJPlatformType.IntellijIdeaCommunity, "2024.2.6")  // sinceBuild floor
+            @Suppress("DEPRECATION")
+            create(IntelliJPlatformType.IntellijIdeaCommunity, "2025.2.6")  // last Community
+            create(IntelliJPlatformType.IntellijIdea, "2026.1.4")
+            create(IntelliJPlatformType.IntellijIdea, "2026.2")             // current
         }
         failureLevel = listOf(
             org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask.FailureLevel.COMPATIBILITY_PROBLEMS,

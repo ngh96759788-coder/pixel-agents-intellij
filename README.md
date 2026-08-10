@@ -107,7 +107,41 @@ Or open the project in IntelliJ IDEA and use the pre-configured Run Configuratio
 ```bash
 # Webview unit tests
 cd webview-ui && npx vitest run
+
+# Binary compatibility against the target IDEs (downloads several GB)
+./gradlew verifyPlugin
 ```
+
+### Releasing
+
+Bump `pluginVersion` in `gradle.properties`, add a matching `## <version>` section
+to `CHANGELOG.md`, then push a tag:
+
+```bash
+git tag v1.0.6 && git push origin v1.0.6
+```
+
+`.github/workflows/release.yml` builds the webview, runs the tests, verifies binary
+compatibility against every target IDE, publishes to JetBrains Marketplace, and
+creates a GitHub Release with the ZIP attached. The tag must match `pluginVersion`
+or the run fails before publishing anything.
+
+Repository secrets:
+
+| Secret | Required | Purpose |
+| --- | --- | --- |
+| `PUBLISH_TOKEN` | yes | Marketplace upload — create at [plugins.jetbrains.com/author/me/tokens](https://plugins.jetbrains.com/author/me/tokens) |
+| `SIGNING_CERTIFICATE_CHAIN` | no | Certificate chain (PEM contents) |
+| `SIGNING_PRIVATE_KEY` | no | Private key (PEM contents) |
+| `SIGNING_PASSWORD` | no | Private key password |
+
+Without the signing secrets the plugin is published unsigned, which Marketplace
+accepts. See [Plugin Signing](https://plugins.jetbrains.com/docs/intellij/plugin-signing.html).
+
+**Compatibility note:** the plugin declares no `until-build` upper bound, so it stays
+listed as new IDEs ship. Nothing checks the newest IDE except `verifyPlugin` — when a
+platform release does break something, add the failing build to the verifier list and
+fix it, rather than re-capping `untilBuild` and silently dropping every user.
 
 ## How It Works
 

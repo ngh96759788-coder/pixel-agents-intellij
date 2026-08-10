@@ -1,0 +1,173 @@
+name: Release
+
+# Tag a commit to publish:
+#   git tag v1.0.6 && git push origin v1.0.6
+# The tag must match `pluginVersion` in gradle.properties — the guard below
+# fails the run otherwise, so a mislabelled release never reaches Marketplace.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build, verify and attach the zip to a GitHub Release, but do not publish to Marketplace'
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, verify & publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # The verifier unpacks four full IDE distributions (two of them Ultimate).
+      # A stock runner has ~14 GB free, which is uncomfortably close.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            webview-ui/package-lock.json
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          PLUGIN_VERSION=$(sed -n 's/^pluginVersion *= *//p' gradle.properties | tr -d '[:space:]')
+          if [ -z "$PLUGIN_VERSION" ]; then
+            echo "::error::pluginVersion not found in gradle.properties"
+            exit 1
+          fi
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [ "$TAG_VERSION" != "$PLUGIN_VERSION" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match pluginVersion ${PLUGIN_VERSION} — bump gradle.properties or retag"
+              exit 1
+            fi
+          fi
+
+          echo "version=$PLUGIN_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing $PLUGIN_VERSION"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          (cd webview-ui && npm ci)
+
+      # Gradle does NOT rebuild webview assets — they must exist before buildPlugin.
+      - name: Build webview
+        run: npm run build
+
+      - name: Run tests
+        run: |
+          (cd webview-ui && npm test)
+          ./gradlew --no-daemon check verifyPluginStructure verifyPluginProjectConfiguration
+
+      - name: Build plugin
+        run: ./gradlew --no-daemon buildPlugin
+
+      # Gate: `until-build` is unbounded, so binary compatibility with the newest
+      # IDE is only ever proven here. Never publish past a failure.
+      - name: Verify plugin against target IDEs
+        run: ./gradlew --no-daemon verifyPlugin
+
+      - name: Upload verifier reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-verifier-reports
+          path: build/reports/pluginVerifier/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # build.gradle.kts reads these as file *paths*, so the PEM contents are
+      # written outside the workspace first. signPlugin skips itself when the
+      # secrets are absent, and publishPlugin then ships the unsigned archive.
+      - name: Stage signing certificate
+        id: signing
+        env:
+          CERTIFICATE_CHAIN: ${{ secrets.SIGNING_CERTIFICATE_CHAIN }}
+          PRIVATE_KEY: ${{ secrets.SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$CERTIFICATE_CHAIN" ] && [ -n "$PRIVATE_KEY" ]; then
+            printf '%s' "$CERTIFICATE_CHAIN" > "$RUNNER_TEMP/chain.crt"
+            printf '%s' "$PRIVATE_KEY" > "$RUNNER_TEMP/private.pem"
+            chmod 600 "$RUNNER_TEMP/chain.crt" "$RUNNER_TEMP/private.pem"
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No signing secrets configured — publishing an unsigned plugin."
+          fi
+
+      - name: Sign plugin
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          SIGNING_CERTIFICATE_CHAIN: ${{ runner.temp }}/chain.crt
+          SIGNING_PRIVATE_KEY: ${{ runner.temp }}/private.pem
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: ./gradlew --no-daemon signPlugin verifyPluginSignature
+
+      - name: Publish to JetBrains Marketplace
+        if: github.event.inputs.dry_run != 'true'
+        env:
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+          SIGNING_CERTIFICATE_CHAIN: ${{ steps.signing.outputs.enabled == 'true' && format('{0}/chain.crt', runner.temp) || '' }}
+          SIGNING_PRIVATE_KEY: ${{ steps.signing.outputs.enabled == 'true' && format('{0}/private.pem', runner.temp) || '' }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: |
+          if [ -z "$PUBLISH_TOKEN" ]; then
+            echo "::error::PUBLISH_TOKEN secret is not set — create one at https://plugins.jetbrains.com/author/me/tokens"
+            exit 1
+          fi
+          ./gradlew --no-daemon publishPlugin
+
+      - name: Extract release notes
+        id: notes
+        run: |
+          VERSION='${{ steps.version.outputs.version }}'
+          awk -v ver="$VERSION" '
+            index($0, "## " ver) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "No CHANGELOG.md section found for $VERSION." > "$RUNNER_TEMP/notes.md"
+            echo "::warning::CHANGELOG.md has no '## $VERSION' section"
+          fi
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            build/distributions/*.zip \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file "$RUNNER_TEMP/notes.md"

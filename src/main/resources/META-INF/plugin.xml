@@ -73,6 +73,7 @@
 <ul>
   <li>The bottom HUD drops detail step by step instead of overlapping the toolbar in narrow windows</li>
   <li>Ctrl/Cmd + mouse wheel zooms the office from anywhere in the panel without zooming the whole page</li>
+  <li>Hiding and showing the tool window no longer reloads the office, so the camera and zoom are kept</li>
   <li>Terminal tabs are tracked by tab, not title: Claude Code's spinning tab title no longer reads as a closed terminal (it filled a fifth of the IDE log) or removes a running agent</li>
 </ul>
 

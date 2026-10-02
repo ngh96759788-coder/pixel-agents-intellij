@@ -98,7 +98,14 @@ class DisplayChangeWatcher(
     }
 
     private fun check() {
-        val gc = component.graphicsConfiguration
+        // Hiding the tool window detaches the browser, so its configuration
+        // reads null, and showing it attaches it again. Treating that as a
+        // display change reloaded the whole webview on every hide/show and
+        // threw away its state (camera, zoom). A detached browser has nothing
+        // to rebind, so wait until it is shown and compare then; the first
+        // configuration ever seen is only recorded.
+        val gc = component.graphicsConfiguration ?: return
+        if (lastGc == null) lastGc = gc
         val dpr = runCatching { JBUIScale.sysScale(component) }.getOrDefault(lastDpr)
         val screens = screenCountSafe()
 

@@ -31,6 +31,7 @@ import { startAuditJsonlWatcher } from "./claudeAuditJsonlWatcher.js"
 import { startProjectsJsonlWatcher, BRIDGE_MODE, OWN_SESSION_ID } from "./claudeProjectsJsonlWatcher.js"
 import { startMainLogWatcher } from "./claudeMainLogWatcher.js"
 import { calculateQuotaWindow } from "./quotaWindow.js"
+import { readRateLimit } from "./rateLimits.js"
 import { DESPAWN_SUB_MS, DESPAWN_MAIN_MS, SWEEPER_INTERVAL_MS, QUOTA_TICK_MS } from "./spec.js"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
@@ -45,7 +46,15 @@ import { dirname, join } from "node:path"
 // Past incidents: Extension Dir got rolled back to an old .mcpb on
 // Desktop restart, but we had no easy way to confirm new vs old code
 // was loaded — this line closes that gap.
+//
+// The version is baked in by esbuild (`--define:__BRIDGE_VERSION__`) so
+// it travels with the code. Reading ../package.json at runtime reported
+// 0.8.2 for a 0.8.7 index.mjs, because deploy.sh copies only
+// server/index.mjs + web/ and the Extension Dir keeps the package.json of
+// the last formally installed .mcpb. The runtime read stays for `tsx` dev.
+declare const __BRIDGE_VERSION__: string | undefined
 const BRIDGE_VERSION = (() => {
+  if (typeof __BRIDGE_VERSION__ !== "undefined") return __BRIDGE_VERSION__
   try {
     const here = dirname(fileURLToPath(import.meta.url))
     const pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8"))
@@ -153,7 +162,7 @@ startMainLogWatcher(store)
 // so the HUD has a value immediately, then re-samples on a 60s tick.
 function pushQuota(): void {
   const w = calculateQuotaWindow()
-  store.setQuotaWindow(w.tokensUsed, w.budget, w.pct)
+  store.setQuotaWindow(w.tokensUsed, w.budget, w.pct, readRateLimit())
 }
 pushQuota()
 const quotaTimer = setInterval(pushQuota, QUOTA_TICK_MS)
@@ -406,10 +415,15 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
             model: a.model ?? null,
           })),
           quotaWindow: {
-            tokensUsed5h: q.tokensUsed,
+            // Weighted per BEHAVIOR_SPEC §3 (cache read 0.10x, cache write
+            // 1.25x) — not a raw token count. `budget` is a guess unless
+            // PIXEL_OFFICE_5H_TOKEN_BUDGET is set, so `pct` is only as good
+            // as that guess; the HUD ignores both and renders the count.
+            weightedTokens5h: q.tokensUsed,
             budget: q.budget,
             pct: Number(q.pct.toFixed(2)),
           },
+          rateLimit: readRateLimit(),
         }
         return {
           content: [{ type: "text", text: JSON.stringify(snapshot, null, 2) }],

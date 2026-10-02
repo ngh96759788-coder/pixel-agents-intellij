@@ -144,13 +144,16 @@ class TranscriptParser(
         val total = extractContextTokens(usage)
         val turn = extractTurnTokens(usage)
         val model = (message["model"] as? String).orEmpty()
-        val turnHasTokens = turn.total > 0L
+        val messageId = (message["id"] as? String).orEmpty()
+        val alreadyCounted = messageId.isNotEmpty() && messageId == agent.lastUsageMessageId
+        val turnHasTokens = turn.total > 0L && !alreadyCounted
         val contextChanged = total > 0L && total != agent.lastContextTokens
         val modelChanged = model.isNotEmpty() && model != agent.lastModel
         if (contextChanged || modelChanged || turnHasTokens) {
-            agent.lastContextTokens = total.coerceAtLeast(agent.lastContextTokens)
+            if (total > 0L) agent.lastContextTokens = total
             if (model.isNotEmpty()) agent.lastModel = model
             if (turnHasTokens) {
+                agent.lastUsageMessageId = messageId
                 agent.cumulativeInput += turn.input
                 agent.cumulativeCacheCreate += turn.cacheCreate
                 agent.cumulativeCacheRead += turn.cacheRead

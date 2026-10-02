@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { estimateCost, formatTokens, formatCost, totalTokens, contextWindowFor } from '../office/usage.js'
+import { estimateCost, formatTokens, formatCost, totalTokens, contextWindowFor, parseModelId, fullestContext, quotaChip, hudParts } from '../office/usage.js'
+import { HUD_MAX_TIER } from '../constants.js'
 
 describe('totalTokens', () => {
   it('sums all four buckets', () => {
@@ -59,6 +60,22 @@ describe('estimateCost', () => {
     )
     // 1M * $3 (input) + 1M * $15 (output) = $18
     expect(cost).toBeCloseTo(18, 5)
+  })
+
+  it('Sonnet 5 is cheaper than Sonnet 4.6: 1M input = $2, 1M output = $10', () => {
+    const cost = estimateCost(
+      { input: 1_000_000, cacheCreate: 0, cacheRead: 0, output: 1_000_000 },
+      'claude-sonnet-5',
+    )
+    expect(cost).toBeCloseTo(12, 5)
+  })
+
+  it('Opus 5 uses Opus rates', () => {
+    const cost = estimateCost(
+      { input: 1_000_000, cacheCreate: 0, cacheRead: 0, output: 1_000_000 },
+      'claude-opus-5',
+    )
+    expect(cost).toBeCloseTo(30, 5)
   })
 
   it('Opus rates: 1M input = $5, 1M output = $25', () => {
@@ -131,7 +148,35 @@ describe('estimateCost', () => {
   })
 })
 
+describe('parseModelId', () => {
+  it('reads the modern tier-major-minor form', () => {
+    expect(parseModelId('claude-opus-5')).toEqual({ tier: 'opus', major: 5, minor: 0 })
+    expect(parseModelId('claude-fable-5-1')).toEqual({ tier: 'fable', major: 5, minor: 1 })
+    expect(parseModelId('claude-sonnet-4-6')).toEqual({ tier: 'sonnet', major: 4, minor: 6 })
+  })
+
+  it('ignores a trailing date suffix', () => {
+    expect(parseModelId('claude-haiku-4-5-20251001')).toEqual({ tier: 'haiku', major: 4, minor: 5 })
+  })
+
+  it('reads the legacy major-minor-tier form without eating the date', () => {
+    expect(parseModelId('claude-3-opus-20240229')).toEqual({ tier: 'opus', major: 3, minor: 0 })
+    expect(parseModelId('claude-3-5-sonnet-20241022')).toEqual({ tier: 'sonnet', major: 3, minor: 5 })
+  })
+
+  it('returns an empty tier for unknown families', () => {
+    expect(parseModelId('claude-mystery-9-9').tier).toBe('')
+    expect(parseModelId(null).tier).toBe('')
+  })
+})
+
 describe('contextWindowFor', () => {
+  it('1M window for the Claude 5 family (the default Claude Code model)', () => {
+    expect(contextWindowFor('claude-opus-5')).toBe(1_000_000)
+    expect(contextWindowFor('claude-fable-5-1')).toBe(1_000_000)
+    expect(contextWindowFor('claude-mythos-5-1')).toBe(1_000_000)
+  })
+
   it('1M window for Fable 5 / Mythos 5 / Opus 4.x / Sonnet 5 / Sonnet 4.6', () => {
     expect(contextWindowFor('claude-fable-5')).toBe(1_000_000)
     expect(contextWindowFor('claude-mythos-5')).toBe(1_000_000)
@@ -145,8 +190,97 @@ describe('contextWindowFor', () => {
     expect(contextWindowFor('claude-haiku-4-5-20251001')).toBe(200_000)
     expect(contextWindowFor('claude-sonnet-4-5-20250929')).toBe(200_000)
     expect(contextWindowFor('claude-3-opus-20240229')).toBe(200_000)
+    expect(contextWindowFor('claude-3-5-sonnet-20241022')).toBe(200_000)
+    expect(contextWindowFor('claude-haiku-4-5')).toBe(200_000)
     expect(contextWindowFor('')).toBe(200_000)
     expect(contextWindowFor(null)).toBe(200_000)
     expect(contextWindowFor(undefined)).toBe(200_000)
+  })
+})
+
+describe('fullestContext', () => {
+  it('uses the last turn context size, so a long session reads well under 100%', () => {
+    const r = fullestContext({ 1: 180_000 }, { 1: 'claude-opus-5-5' })
+    expect(r).toEqual({ tokens: 180_000, cap: 1_000_000, agentId: 1 })
+    expect(Math.round((r.tokens / r.cap) * 100)).toBe(18)
+  })
+
+  it('picks the session closest to its own window', () => {
+    const r = fullestContext(
+      { 1: 400_000, 2: 150_000 },
+      { 1: 'claude-opus-5-5', 2: 'claude-haiku-4-5-20251001' },
+    )
+    expect(r.agentId).toBe(2)
+    expect(r.cap).toBe(200_000)
+  })
+
+  it('returns an empty result when nothing has reported', () => {
+    expect(fullestContext({ 1: 0 }, {})).toEqual({ tokens: 0, cap: 200_000, agentId: null })
+  })
+})
+
+describe('quotaChip', () => {
+  const sevenReset = new Date('2026-10-07T21:00').getTime()
+  const at = new Date('2026-10-02T15:00').getTime()
+  const rl = {
+    fiveHourPct: 14.4,
+    sevenDayPct: 23,
+    resetsAt: new Date('2026-10-02T17:00').getTime(),
+    sevenDayResetsAt: sevenReset,
+    source: 'cli' as const,
+    sampledAt: new Date('2026-10-02T14:55').getTime(),
+  }
+
+  it('shows 5h, 7d and the weekday pace, and stays blue under the pace', () => {
+    const chip = quotaChip(rl, 23_400_000, at)
+    expect(chip?.label).toBe('5h 14% · 7d 23% (pace 35%)')
+    expect(chip?.ahead).toBe(false)
+    expect(chip?.title).toContain('5-hour usage 14%, resets at 17:00')
+    expect(chip?.title).toContain('7-day usage 23%, weekday pace 35% (12 pts under), resets Wed 21:00')
+    expect(chip?.title).toContain('Claude Code statusline, measured at 14:55')
+  })
+
+  it('flags 7d usage that is ahead of the weekday pace', () => {
+    const chip = quotaChip({ ...rl, sevenDayPct: 52 }, 0, at)
+    expect(chip?.ahead).toBe(true)
+    expect(chip?.title).toContain('(ahead by 17 pts)')
+  })
+
+  it('drops the pace for a Desktop sample, which has no 7d reset time', () => {
+    const chip = quotaChip({ ...rl, source: 'desktop', resetsAt: null, sevenDayResetsAt: null }, 0, at)
+    expect(chip?.label).toBe('5h 14% · 7d 23%')
+    expect(chip?.ahead).toBe(false)
+    expect(chip?.title).toContain('reset time unknown')
+  })
+
+  it('drops the pace once the 7d window has reset', () => {
+    const chip = quotaChip({ ...rl, sevenDayPct: 99 }, 0, sevenReset + 1)
+    expect(chip?.label).toBe('5h 14% · 7d 99%')
+    expect(chip?.ahead).toBe(false)
+  })
+
+  it('shows only 5h when no 7d reading exists', () => {
+    expect(quotaChip({ ...rl, sevenDayPct: null }, 0, at)?.label).toBe('5h 14%')
+  })
+
+  it('falls back to the weighted token count without a real percentage', () => {
+    const chip = quotaChip(null, 23_400_000, at)
+    expect(chip?.label).toBe('23.4M / 5h')
+    expect(chip?.ahead).toBe(false)
+  })
+
+  it('renders nothing before either value exists', () => {
+    expect(quotaChip(null, 0, at)).toBeNull()
+  })
+})
+
+describe('hudParts', () => {
+  it('drops detail one step at a time and hides only at the last tier', () => {
+    expect(hudParts(0)).toEqual({ tokText: true, modelChip: true, contextBar: true, compactScale: false, visible: true })
+    expect(hudParts(1)).toEqual({ tokText: false, modelChip: true, contextBar: true, compactScale: false, visible: true })
+    expect(hudParts(2)).toEqual({ tokText: false, modelChip: false, contextBar: true, compactScale: false, visible: true })
+    expect(hudParts(3)).toEqual({ tokText: false, modelChip: false, contextBar: false, compactScale: false, visible: true })
+    expect(hudParts(4)).toEqual({ tokText: false, modelChip: false, contextBar: false, compactScale: true, visible: true })
+    expect(hudParts(HUD_MAX_TIER).visible).toBe(false)
   })
 })

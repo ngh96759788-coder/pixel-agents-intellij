@@ -72,9 +72,13 @@ intellijPlatform {
     }
 
     // Plugin Verifier — catches deprecated/removed API usage against target IDEs
-    // before publishing. Run via `./gradlew verifyPlugin`. Failure level is set
-    // to NOT_DYNAMIC so deprecation warnings stay informational and don't fail
-    // the build, while structural / scheduled-for-removal issues do fail.
+    // before publishing. Run via `./gradlew verifyPlugin`. Deprecated usages stay
+    // informational: the two we have (FileSaverDescriptor, createShellWidget)
+    // have no replacement that also exists in 2024.2 (sinceBuild 242). What does
+    // fail is anything that turns into breakage later — an API JetBrains marks
+    // scheduled-for-removal, internal, override-only or non-extendable — so the
+    // release stops here instead of the Marketplace verification mail being the
+    // first notice.
     pluginVerification {
         ides {
             // Explicit list rather than `recommended()`: that helper resolves
@@ -94,12 +98,17 @@ intellijPlatform {
         failureLevel = listOf(
             org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask.FailureLevel.COMPATIBILITY_PROBLEMS,
             org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask.FailureLevel.INVALID_PLUGIN,
+            org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask.FailureLevel.SCHEDULED_FOR_REMOVAL_API_USAGES,
+            org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask.FailureLevel.INTERNAL_API_USAGES,
+            org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask.FailureLevel.OVERRIDE_ONLY_API_USAGES,
+            org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask.FailureLevel.NON_EXTENDABLE_API_USAGES,
         )
     }
 }
 
-// Copy webview build output into plugin resources
-val copyWebview by tasks.registering(Copy::class) {
+// Sync (not Copy) so bundles from earlier builds are removed instead of
+// piling up in the plugin jar: every Vite build emits a new hashed index-*.js.
+val copyWebview by tasks.registering(Sync::class) {
     from(file("dist/webview"))
     into(layout.buildDirectory.dir("resources/main/webview"))
 }

@@ -13,6 +13,7 @@ describe('modelChip', () => {
       outline: '#3a2a5a',
     })
     expect(modelChip('claude-opus-4-8')!.label).toBe('OPUS 4.8')
+    expect(modelChip('claude-opus-5')!.label).toBe('OPUS 5')
     expect(modelChip('Claude-Opus-4-6')).not.toBeNull()
   })
 
@@ -31,10 +32,16 @@ describe('modelChip', () => {
     expect(chip!.fill).toBe('#c8a85a')
   })
 
+  it('renders the legacy major-minor-tier ids without their date suffix', () => {
+    expect(modelChip('claude-3-opus-20240229')!.label).toBe('OPUS 3')
+    expect(modelChip('claude-3-5-sonnet-20241022')!.label).toBe('SON 3.5')
+  })
+
   it('detects Fable 5 (Mythos-class tier)', () => {
     const chip = modelChip('claude-fable-5')
     expect(chip).not.toBeNull()
     expect(chip!.label).toBe('FABLE 5')
+    expect(modelChip('claude-fable-5-1')!.label).toBe('FABLE 5.1')
     expect(chip!.fill).toBe('#4a9e8e')
   })
 

@@ -24,12 +24,20 @@
  *     Enterprise differ. The default is the published Pro figure;
  *     users on other plans set the env var.
  *   - Output tokens count too (Anthropic bills them against quota).
+ *   - Buckets are weighted by `QUOTA_WEIGHTS` (cache reads 0.10x, cache
+ *     writes 1.25x). A raw sum is ~99% cache reads and describes how much
+ *     history is being re-read, not how much quota is being spent.
+ *   - One API response is written as SEVERAL `assistant` lines (one per
+ *     content-block group), each repeating the same `message.usage` and the
+ *     same `message.id`. Summing lines double-counts most turns, so we key on
+ *     `message.id` and count each response once — across the whole scan, since
+ *     a resumed session replays earlier responses into a new file.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
-import { QUOTA_WINDOW_MS, DEFAULT_5H_TOKEN_BUDGET } from "./spec.js"
+import { QUOTA_WINDOW_MS, DEFAULT_5H_TOKEN_BUDGET, QUOTA_WEIGHTS } from "./spec.js"
 
 const FIVE_HOURS_MS = QUOTA_WINDOW_MS
 const DEFAULT_5H_BUDGET = DEFAULT_5H_TOKEN_BUDGET
@@ -57,6 +65,7 @@ export function calculateQuotaWindow(): QuotaWindow {
   const cutoff = Date.now() - FIVE_HOURS_MS
   const baseDir = join(homedir(), ".claude", "projects")
   const budget = parseBudget()
+  const counted = new Set<string>()
   let tokensUsed = 0
 
   let projects: string[]
@@ -93,7 +102,12 @@ export function calculateQuotaWindow(): QuotaWindow {
       }
       for (const line of content.split("\n")) {
         if (!line) continue
-        let d: { type?: string; timestamp?: string; message?: { usage?: Record<string, number> } }
+        let d: {
+          type?: string
+          timestamp?: string
+          uuid?: string
+          message?: { id?: string; usage?: Record<string, number> }
+        }
         try {
           d = JSON.parse(line)
         } catch {
@@ -104,15 +118,19 @@ export function calculateQuotaWindow(): QuotaWindow {
         if (!Number.isFinite(ts) || ts < cutoff) continue
         const u = d.message?.usage
         if (!u) continue
+        const key = d.message?.id ?? d.uuid
+        if (!key || counted.has(key)) continue
+        counted.add(key)
         tokensUsed +=
-          (u.input_tokens ?? 0) +
-          (u.cache_creation_input_tokens ?? 0) +
-          (u.cache_read_input_tokens ?? 0) +
-          (u.output_tokens ?? 0)
+          (u.input_tokens ?? 0) * QUOTA_WEIGHTS.input_tokens +
+          (u.cache_creation_input_tokens ?? 0) * QUOTA_WEIGHTS.cache_creation_input_tokens +
+          (u.cache_read_input_tokens ?? 0) * QUOTA_WEIGHTS.cache_read_input_tokens +
+          (u.output_tokens ?? 0) * QUOTA_WEIGHTS.output_tokens
       }
     }
   }
 
-  const pct = budget > 0 ? Math.min(100, (tokensUsed / budget) * 100) : 0
-  return { tokensUsed, budget, pct }
+  const weighted = Math.round(tokensUsed)
+  const pct = budget > 0 ? Math.min(100, (weighted / budget) * 100) : 0
+  return { tokensUsed: weighted, budget, pct }
 }

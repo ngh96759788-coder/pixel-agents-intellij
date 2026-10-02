@@ -13,6 +13,7 @@ import { setIdentityIcons, setStatusIcons, setHeadFrame } from '../office/engine
 import { vscode } from '../vscodeApi.js'
 import { playDoneSound, playSpawnSound, playDespawnSound, playThemeSwitchSound, setSoundEnabled } from '../notificationSound.js'
 import { debug } from '../debug.js'
+import type { RateLimit } from '../office/usage.js'
 
 export interface SubagentCharacter {
   id: number
@@ -84,6 +85,7 @@ export interface ExtensionMessageState {
   /** Rolling 5h absolute token usage summed across every
    *  ~/.claude/projects session. Pushed by the bridge every 60s. */
   quotaTokens: number
+  rateLimit: RateLimit | null
   /** True when the host is the MCP bridge widget (Claude Desktop). Used
    *  by UI to hide IDE-only affordances like + Agent. */
   bridgeMode: boolean
@@ -145,6 +147,7 @@ export function useExtensionMessages(
   // ABSOLUTE token count (not a % of an estimated budget), so we track
   // tokensUsed rather than pct.
   const [quotaTokens, setQuotaTokens] = useState(0)
+  const [rateLimit, setRateLimit] = useState<RateLimit | null>(null)
 
   // Track whether initial layout has been loaded (ref to avoid re-render)
   const layoutReadyRef = useRef(false)
@@ -187,6 +190,13 @@ export function useExtensionMessages(
 
     const handler = (e: MessageEvent) => {
       const msg = e.data
+      // IntelliJ watchdog: answering proves the renderer, React and the JS
+      // bridge are all alive. A crashed React tree has unmounted this listener
+      // and stays silent, which is what makes the plugin reload it.
+      if (msg?.type === 'ping') {
+        vscode.postMessage({ type: 'pong' })
+        return
+      }
       const os = getOfficeState()
 
       if (msg.type === 'layoutLoaded') {
@@ -810,6 +820,8 @@ export function useExtensionMessages(
         if (typeof tokens === 'number') {
           setQuotaTokens((prev) => (prev === tokens ? prev : tokens))
         }
+        const rl = (msg.rateLimit ?? null) as RateLimit | null
+        setRateLimit((prev) => (JSON.stringify(prev) === JSON.stringify(rl) ? prev : rl))
       } else if (msg.type === 'furnitureAssetsLoaded') {
         try {
           const catalog = msg.catalog as FurnitureAsset[]
@@ -848,7 +860,7 @@ export function useExtensionMessages(
     return () => window.removeEventListener('message', handler)
   }, [getOfficeState])
 
-  return { agents, selectedAgent, agentTools, agentStatuses, agentUsage, agentModel, agentCumulative, agentDisplayNames, agentWorktreeBranches, subagentTools, subagentCharacters, layoutReady, loadedAssets, currentTheme, overlayDefaults, setOverlayDefault, sharedLayoutAcrossProjects, setSharedLayoutAcrossProjects, unifiedView, setUnifiedView, quotaTokens, bridgeMode, topOffset }
+  return { agents, selectedAgent, agentTools, agentStatuses, agentUsage, agentModel, agentCumulative, agentDisplayNames, agentWorktreeBranches, subagentTools, subagentCharacters, layoutReady, loadedAssets, currentTheme, overlayDefaults, setOverlayDefault, sharedLayoutAcrossProjects, setSharedLayoutAcrossProjects, unifiedView, setUnifiedView, quotaTokens, rateLimit, bridgeMode, topOffset }
 
   /** Toggle one overlay default both locally (optimistic) and in the
    *  extension settings (durable). Defined inside the hook so it closes

@@ -1,3 +1,5 @@
+import type { RateLimitReading } from "./rateLimits.js"
+
 /**
  * In-memory office state owned by the MCP server. Single source of truth
  * for every Claude Desktop work item the bridge currently knows about.
@@ -79,7 +81,7 @@ export type OfficeEvent =
   /** Rolling 5h token-usage window — emitted from index.ts's
    *  1-minute calculateQuotaWindow tick. The WS layer broadcasts this
    *  as `quotaWindow` to the webview HUD. */
-  | { type: "quota"; tokensUsed: number; budget: number; pct: number }
+  | { type: "quota"; tokensUsed: number; budget: number; pct: number; rateLimit: RateLimitReading | null }
 
 type Listener = (evt: OfficeEvent) => void
 
@@ -107,10 +109,11 @@ export class OfficeStore {
   /** Most recent rolling-5h quota window snapshot. Cached so the
    *  WS layer can replay it on new connections instead of waiting up
    *  to a minute for the next tick. */
-  private quota: { tokensUsed: number; budget: number; pct: number } = {
+  private quota: { tokensUsed: number; budget: number; pct: number; rateLimit: RateLimitReading | null } = {
     tokensUsed: 0,
     budget: 0,
     pct: 0,
+    rateLimit: null,
   }
 
   list(): AgentRecord[] {
@@ -261,16 +264,17 @@ export class OfficeStore {
   /** Push a new rolling-5h token usage snapshot. Called from the
    *  bridge's 1-minute calculateQuotaWindow tick. No-op when the
    *  numbers haven't changed so we don't spam idle WS clients. */
-  setQuotaWindow(tokensUsed: number, budget: number, pct: number): void {
+  setQuotaWindow(tokensUsed: number, budget: number, pct: number, rateLimit: RateLimitReading | null): void {
     if (
       this.quota.tokensUsed === tokensUsed
       && this.quota.budget === budget
       && this.quota.pct === pct
+      && JSON.stringify(this.quota.rateLimit) === JSON.stringify(rateLimit)
     ) {
       return
     }
-    this.quota = { tokensUsed, budget, pct }
-    this.emit({ type: "quota", tokensUsed, budget, pct })
+    this.quota = { tokensUsed, budget, pct, rateLimit }
+    this.emit({ type: "quota", tokensUsed, budget, pct, rateLimit })
   }
 
   /** Despawn-only sweeper. Per BEHAVIOR_SPEC §2 there is a SINGLE

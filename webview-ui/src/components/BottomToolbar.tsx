@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type RefObject } from 'react'
 import { SettingsModal } from './SettingsModal.js'
 
 interface OverlayDefaultsView {
@@ -24,6 +24,8 @@ interface BottomToolbarProps {
   /** True when running inside the MCP bridge widget. Hides IDE-only
    *  affordances (+ Agent) that can't be wired to Claude Desktop. */
   bridgeMode?: boolean
+  /** Lets the bottom HUD measure the toolbar so it never overlaps it. */
+  panelRef?: RefObject<HTMLDivElement | null>
 }
 
 const panelStyle: React.CSSProperties = {
@@ -72,12 +74,13 @@ export function BottomToolbar({
   unifiedView,
   onToggleUnifiedView,
   bridgeMode,
+  panelRef,
 }: BottomToolbarProps) {
   const [hovered, setHovered] = useState<string | null>(null)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
   return (
-    <div style={panelStyle}>
+    <div ref={panelRef} style={panelStyle}>
       {!bridgeMode && (
         <button
           onClick={onOpenClaude}

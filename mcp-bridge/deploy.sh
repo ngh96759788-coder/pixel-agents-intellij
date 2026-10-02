@@ -30,7 +30,9 @@ if [ ! -d "$EXTDIR" ]; then
 fi
 
 cp -f "$DIR/server/index.mjs" "$EXTDIR/server/index.mjs"
-cp -rf "$DIR/web/." "$EXTDIR/web/"
+# --delete drops hashed bundles from earlier syncs; index.html only
+# references the current one.
+rsync -a --delete "$DIR/web/" "$EXTDIR/web/"
 
 EXT_SHA=$(shasum -a 256 "$EXTDIR/server/index.mjs" | cut -c1-16)
 SRC_SHA=$(shasum -a 256 "$DIR/server/index.mjs" | cut -c1-16)

@@ -25,7 +25,24 @@ export const QUOTA_WINDOW_MS = 5 * 3600 * 1000
 /** §3 quotaWindow 재계산 주기 (분당). */
 export const QUOTA_TICK_MS = 60_000
 
+/** §3 5h 윈도우 합산의 버킷별 가중치. 가중치 없이 더하면 합계의 98.8%가
+ *  cache read 라서(실측) 리미트 잔여량과 거의 무관한 숫자가 된다. 값은
+ *  공개 과금 배수이고 webview 의 `estimateCost()` 가 쓰는 것과 같다.
+ *  Kotlin `Constants.QUOTA_WEIGHT_*` 와 같은 값을 유지할 것. */
+export const QUOTA_WEIGHTS = {
+  input_tokens: 1.0,
+  cache_creation_input_tokens: 1.25,
+  cache_read_input_tokens: 0.10,
+  output_tokens: 1.0,
+} as const
+
 /** §3 토큰 budget 기본값. env `PIXEL_OFFICE_5H_TOKEN_BUDGET`로 override.
  *  Anthropic이 공개 plan budget을 안 줘서 추정치이고, 표시는 절대 토큰
  *  ("N / 5h")이라 분모 부정확성이 사용자에게 직접 영향 주지 않는다. */
 export const DEFAULT_5H_TOKEN_BUDGET = 1_000_000
+
+/** §3 Desktop `plan-usage-history.json` 표본을 실제 5h 사용률로 믿는 최대 나이.
+ *  Desktop 표본 간격 실측 15분 + 여유 5분. CLI statusline 값에는 나이 제한이
+ *  없고 `resets_at`이 지나면 버린다. Kotlin `Constants.DESKTOP_USAGE_SAMPLE_MAX_AGE_MS`
+ *  와 같은 값을 유지할 것. */
+export const DESKTOP_USAGE_SAMPLE_MAX_AGE_MS = 20 * 60 * 1000

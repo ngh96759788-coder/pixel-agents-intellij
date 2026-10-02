@@ -48,6 +48,34 @@
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>1.0.6</h3>
+<p><b>Bottom HUD token readout</b></p>
+<ul>
+  <li>The rolling 5-hour figure is now a weighted sum (cache reads 0.10x, cache writes 1.25x, matching how they are billed). Summed raw it was 98.8% cache reads, so it tracked how much history got re-read rather than how much quota was spent</li>
+  <li>The context bar was scaled against the session's cumulative throughput instead of how full the context window actually is, so any long-running session pegged it at 100%. It now reads the same signal as the per-character HP bar</li>
+  <li><code>claude-opus-5</code> was treated as a 200K-context model &mdash; the current Claude Code default now correctly scales to 1M, as do Sonnet 5 and Fable/Mythos 5.x</li>
+  <li>The rolling 5-hour token total counted every turn twice: Claude Code writes one API response as several transcript lines that each repeat the same usage block. Responses are now counted once</li>
+  <li>Legacy model ids such as <code>claude-3-opus-20240229</code> rendered their date suffix as the version (<code>OPUS 20240229</code>)</li>
+  <li>Cost table split for Sonnet 5 ($2/$10), which is cheaper than Sonnet 4.6</li>
+</ul>
+<p><b>Real 5-hour and 7-day usage</b></p>
+<ul>
+  <li>The HUD shows your real plan usage (<code>5h 14% &middot; 7d 23% (pace 35%)</code>) when Claude Code's status line or Claude Desktop reports it, and falls back to the weighted token sum otherwise. See the README for the status line snippet</li>
+  <li><b>Pace</b> is where 7-day usage would be now if the week's limit were spread evenly over its weekday hours. The chip turns amber when you are ahead of it</li>
+  <li>Optional Claude Code hook (<code>hooks/usage-pace.py</code>) that tells Claude when 7-day usage is ahead of the pace, and adds nothing otherwise</li>
+</ul>
+<p><b>When the IDE's built-in browser stops</b></p>
+<ul>
+  <li>A crashed page renderer is reloaded at once. A silent page is reloaded, then the browser is recreated</li>
+  <li>When IntelliJ's JCEF process itself is gone (it is not restarted by the IDE), the panel says so and offers Restart IDE / Try again instead of staying blank. A frozen IDE is never mistaken for a dead browser</li>
+</ul>
+<p><b>Other</b></p>
+<ul>
+  <li>The bottom HUD drops detail step by step instead of overlapping the toolbar in narrow windows</li>
+  <li>Ctrl/Cmd + mouse wheel zooms the office from anywhere in the panel without zooming the whole page</li>
+  <li>Terminal tabs are tracked by tab, not title: Claude Code's spinning tab title no longer reads as a closed terminal (it filled a fifth of the IDE log) or removes a running agent</li>
+</ul>
+
 <h3>1.0.5</h3>
 <p><b>Compatibility</b></p>
 <ul>

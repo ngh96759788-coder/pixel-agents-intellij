@@ -10,12 +10,23 @@ import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.handler.CefDisplayHandler
 import org.cef.handler.CefLoadHandlerAdapter
+import org.cef.handler.CefRequestHandler
+import org.cef.handler.CefRequestHandlerAdapter
 
 class WebviewBridge(
     private val browser: JBCefBrowser,
     private val onMessage: (Map<String, Any?>) -> Unit,
+    /** Any message from the page, including `pong`: proof the renderer and the
+     *  JS bridge are both still working. Called on the JCEF thread. */
+    private val onAlive: () -> Unit = {},
+    /** The renderer process ended; the argument says why. */
+    private val onRenderProcessGone: (String) -> Unit = {},
 ) {
     private val gson = Gson()
+    /** Set once this bridge's browser is being thrown away; its late callbacks
+     *  (a disposed browser reports its renderer as killed) must not trigger
+     *  recovery of the browser that replaced it. */
+    @Volatile private var disposed = false
     private val jsQuery = JBCefJSQuery.create(browser as JBCefBrowserBase)
 
     companion object {
@@ -28,6 +39,8 @@ class WebviewBridge(
             try {
                 @Suppress("UNCHECKED_CAST")
                 val message = gson.fromJson(jsonString, Map::class.java) as Map<String, Any?>
+                if (!disposed) onAlive()
+                if (message["type"] == "pong") return@addHandler JBCefJSQuery.Response(null)
                 LOG.info("Received webview message: ${message["type"]}")
                 ApplicationManager.getApplication().invokeLater {
                     onMessage(message)
@@ -50,6 +63,27 @@ class WebviewBridge(
             }
             override fun onCursorChange(b: CefBrowser, cursorType: Int): Boolean = false
             override fun onFullscreenModeChange(b: CefBrowser, fullscreen: Boolean) {}
+        }, browser.cefBrowser)
+
+        browser.jbCefClient.addRequestHandler(object : CefRequestHandlerAdapter() {
+            // IntelliJ 2024.2–2025.x JCEF.
+            override fun onRenderProcessTerminated(b: CefBrowser, status: CefRequestHandler.TerminationStatus) {
+                if (!disposed) onRenderProcessGone(status.name)
+            }
+
+            // IntelliJ 2026.1+ JCEF adds the error code and text. This does not
+            // exist in the 2024.2 API we compile against, so it cannot carry
+            // `override`; the JVM still binds it by name and descriptor when the
+            // newer interface calls it.
+            @Suppress("unused")
+            fun onRenderProcessTerminated(
+                b: CefBrowser,
+                status: CefRequestHandler.TerminationStatus,
+                errorCode: Int,
+                errorString: String?,
+            ) {
+                if (!disposed) onRenderProcessGone("${status.name} code=$errorCode ${errorString.orEmpty()}".trim())
+            }
         }, browser.cefBrowser)
 
         // Inject the bridge function after page loads
@@ -85,6 +119,16 @@ class WebviewBridge(
         cefBrowser.executeJavaScript(js, cefBrowser.url, 0)
     }
 
+    /** Pushes a watchdog ping right away; the caller is on the EDT. Returns
+     *  whether it reached JCEF, so only delivered pings count as unanswered. */
+    fun ping(): Boolean = try {
+        browser.cefBrowser.executeJavaScript("window.postMessage({type:'ping'}, '*');", browser.cefBrowser.url, 0)
+        true
+    } catch (e: Exception) {
+        LOG.warn("Watchdog ping failed", e)
+        false
+    }
+
     fun sendToWebview(type: String, payload: Map<String, Any?>) {
         val message = payload.toMutableMap()
         message["type"] = type
@@ -103,6 +147,7 @@ class WebviewBridge(
     }
 
     fun dispose() {
+        disposed = true
         jsQuery.dispose()
     }
 }

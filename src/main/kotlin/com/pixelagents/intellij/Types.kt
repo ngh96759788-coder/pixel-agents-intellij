@@ -44,6 +44,11 @@ data class AgentState(
     @Volatile var lastContextTokens: Long = -1L,
     /** Last observed model id from `message.model` (e.g. "claude-opus-4-7"). Empty = unknown. */
     @Volatile var lastModel: String = "",
+    /** `message.id` of the assistant record whose usage was last folded into the
+     *  cumulative counters. Claude Code writes one API response as several
+     *  `assistant` lines (text / thinking / tool_use), each repeating the same
+     *  usage block — without this guard every such turn is counted twice. */
+    @Volatile var lastUsageMessageId: String = "",
     /** Cumulative API throughput across all turns in this session.
      *  Each field accumulates from `message.usage` on every assistant record:
      *  - cumulativeInput / cacheCreate / cacheRead / output
@@ -69,7 +74,7 @@ data class AgentState(
     /** Git branch of the worktree this session runs in, when the session was
      *  adopted from a worktree of the open repo (IntelliJ 2026.1 task hand-off).
      *  null for the main worktree / non-worktree sessions. The webview shows it
-     *  as a "⑂branch" suffix so users can tell which branch each agent works on. */
+     *  as a "↳branch" suffix so users can tell which branch each agent works on. */
     @Volatile var worktreeBranch: String? = null,
 )
 

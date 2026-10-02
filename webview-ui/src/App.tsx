@@ -123,7 +123,7 @@ function App() {
 
   const isEditDirty = useCallback(() => editor.isEditMode && editor.isDirty, [editor.isEditMode, editor.isDirty])
 
-  const { agents, selectedAgent, agentTools, agentStatuses, agentUsage, agentModel, agentCumulative, agentDisplayNames, agentWorktreeBranches, subagentTools, subagentCharacters, layoutReady, loadedAssets, currentTheme, overlayDefaults, setOverlayDefault, sharedLayoutAcrossProjects, setSharedLayoutAcrossProjects, unifiedView, setUnifiedView, quotaTokens, bridgeMode, topOffset } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty)
+  const { agents, selectedAgent, agentTools, agentStatuses, agentUsage, agentModel, agentCumulative, agentDisplayNames, agentWorktreeBranches, subagentTools, subagentCharacters, layoutReady, loadedAssets, currentTheme, overlayDefaults, setOverlayDefault, sharedLayoutAcrossProjects, setSharedLayoutAcrossProjects, unifiedView, setUnifiedView, quotaTokens, rateLimit, bridgeMode, topOffset } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty)
 
   const [isDebugMode, setIsDebugMode] = useState(false)
 
@@ -134,6 +134,7 @@ function App() {
   }, [])
 
   const containerRef = useRef<HTMLDivElement>(null)
+  const toolbarRef = useRef<HTMLDivElement>(null)
 
   const [editorTickForKeyboard, setEditorTickForKeyboard] = useState(0)
   useEditorKeyboard(
@@ -208,7 +209,6 @@ function App() {
         onDragMove={editor.handleDragMove}
         editorTick={editor.editorTick}
         zoom={editor.zoom}
-        onZoomChange={editor.handleZoomChange}
         panRef={editor.panRef}
         overlayDefaults={overlayDefaults}
       />
@@ -240,6 +240,7 @@ function App() {
         unifiedView={unifiedView}
         onToggleUnifiedView={setUnifiedView}
         bridgeMode={bridgeMode}
+        panelRef={toolbarRef}
       />
 
       {editor.isEditMode && editor.isDirty && (
@@ -320,10 +321,13 @@ function App() {
       <BottomHUD
         agents={agents}
         agentModel={agentModel}
-        agentCumulative={agentCumulative}
+        agentUsage={agentUsage}
         agentTools={agentTools}
         agentStatuses={agentStatuses}
         quotaTokens={quotaTokens}
+        rateLimit={rateLimit}
+        containerRef={containerRef}
+        toolbarRef={toolbarRef}
       />
 
       {isDebugMode && (

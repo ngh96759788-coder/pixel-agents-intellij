@@ -75,20 +75,55 @@ export function shortInputSummary(
 }
 
 /**
- * Approximate context-window cap (tokens) for a given Anthropic model
- * id. Used to scale the HUD percentage so Opus 4.x's 1M window doesn't
- * read as "90% full" when only 18% is used. Returns 200K as the safe
- * default — accurate for Sonnet/Haiku 4.x and Claude 3.x.
+ * Tier + major/minor version parsed out of a Claude model id. Handles the
+ * modern `claude-<tier>-<major>[-<minor>]` form and the legacy inverted
+ * `claude-<major>[-<minor>]-<tier>` form. A 3+ digit segment is a date
+ * suffix, not a version, so it is rejected.
+ *
+ * Kept in sync with `webview-ui/src/office/usage.ts` — the bridge does not
+ * import the webview module.
+ */
+export interface ParsedModel {
+  tier: "fable" | "mythos" | "opus" | "sonnet" | "haiku" | ""
+  major: number
+  minor: number
+}
+
+const TIER_RE = /(fable|mythos|opus|sonnet|haiku)/
+const MODERN_RE = /(?:fable|mythos|opus|sonnet|haiku)-(\d{1,2})(?:-(\d{1,2})(?!\d))?/
+const LEGACY_RE = /(\d{1,2})(?:-(\d{1,2}))?-(?:fable|mythos|opus|sonnet|haiku)/
+
+export function parseModelId(modelId: string | undefined | null): ParsedModel {
+  const none: ParsedModel = { tier: "", major: 0, minor: 0 }
+  if (!modelId) return none
+  const id = modelId.toLowerCase()
+  const tierMatch = TIER_RE.exec(id)
+  if (!tierMatch) return none
+  const tier = tierMatch[1] as ParsedModel["tier"]
+  const legacy = LEGACY_RE.exec(id)
+  if (legacy) return { tier, major: Number(legacy[1]), minor: Number(legacy[2] ?? 0) }
+  const modern = MODERN_RE.exec(id)
+  if (modern) return { tier, major: Number(modern[1]), minor: Number(modern[2] ?? 0) }
+  return { tier, major: 0, minor: 0 }
+}
+
+/**
+ * Context-window cap (tokens) for a Claude model id. Fable/Mythos 5.x,
+ * Opus 4.6-4.8, Opus 5, Sonnet 5 and Sonnet 4.6 ship 1M; Haiku, the Claude
+ * 3.x generation and anything unrecognised stay at the 200K default.
  */
 export function contextWindowFor(modelId: string | undefined | null): number {
-  if (!modelId) return 200_000
-  const id = modelId.toLowerCase()
-  // Claude 5 family (Fable/Mythos/Sonnet 5) ships a 1M context window.
-  if (id.includes("fable") || id.includes("mythos")) return 1_000_000
-  // Opus 4.x ships with a 1M context window. Older Opus models keep
-  // the 200K default.
-  if (id.includes("opus") && /opus-4/.test(id)) return 1_000_000
-  // Sonnet 5 / Sonnet 4.6 ship 1M; older Sonnets stay conservative 200K.
-  if (/sonnet-5/.test(id) || /sonnet-4-6/.test(id)) return 1_000_000
-  return 200_000
+  const { tier, major, minor } = parseModelId(modelId)
+  switch (tier) {
+    case "fable":
+    case "mythos":
+      return major >= 5 ? 1_000_000 : 200_000
+    case "opus":
+      return major >= 4 ? 1_000_000 : 200_000
+    case "sonnet":
+      if (major >= 5) return 1_000_000
+      return major === 4 && minor >= 6 ? 1_000_000 : 200_000
+    default:
+      return 200_000
+  }
 }

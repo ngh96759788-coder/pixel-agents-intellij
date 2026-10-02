@@ -34,9 +34,42 @@ object Constants {
     const val SUBAGENT_STALE_THRESHOLD_MS = 30_000L
 
     // Rolling token-usage window for the global HUD (BEHAVIOR_SPEC §3:
-    // absolute tokens over a 5h window, refreshed every minute).
+    // absolute weighted tokens over a 5h window, refreshed every minute).
     const val QUOTA_WINDOW_MS = 5 * 60 * 60 * 1000L
     const val QUOTA_TICK_MS = 60_000L
+
+    // Per-bucket weights for the 5h window sum (BEHAVIOR_SPEC §3). A raw sum is
+    // dominated by cache reads — measured 98.8% of the total on this machine —
+    // which makes the number a cache-read counter rather than a quota signal.
+    // These are the published billing multipliers relative to fresh input, the
+    // same ones `estimateCost()` applies webview-side. Keep in sync with
+    // mcp-bridge/src/spec.ts.
+    const val QUOTA_WEIGHT_INPUT = 1.0
+    const val QUOTA_WEIGHT_CACHE_CREATE = 1.25
+    const val QUOTA_WEIGHT_CACHE_READ = 0.10
+    const val QUOTA_WEIGHT_OUTPUT = 1.0
+
+    // Real 5h / 7d usage percentage (BEHAVIOR_SPEC §3). The CLI reading is
+    // written by the statusline script and stays valid until its resets_at;
+    // Desktop's own history has no reset time, so a sample is trusted only up
+    // to its measured 15-minute cadence plus 5 minutes. Keep in sync with
+    // mcp-bridge/src/spec.ts.
+    const val DESKTOP_USAGE_SAMPLE_MAX_AGE_MS = 20 * 60 * 1000L
+    const val RATE_LIMITS_FILE_NAME = "rate-limits.json"
+    const val DESKTOP_USAGE_HISTORY_FILE_NAME = "plan-usage-history.json"
+
+    // Webview watchdog. The plugin pushes a ping and the webview answers; any
+    // webview message counts as alive. Pinging from the plugin side (rather
+    // than a webview timer) matters because Chromium throttles timers in hidden
+    // pages to once a minute, which would read as a stall. Each STALE window
+    // without an answer escalates: reload, recreate the browser, give up and
+    // ask for an IDE restart.
+    const val WEBVIEW_PING_INTERVAL_MS = 30_000L
+    const val WEBVIEW_STALE_MS = 90_000L
+    // After a reload or a recreate, how long to wait for an answer before the
+    // next step. A live JCEF reloads the local page and answers in ~100 ms
+    // (measured 90–100 ms on 2024.2 and on 2026.1), so this is generous.
+    const val WEBVIEW_RECOVERY_WAIT_MS = 15_000L
 
     // Display truncation
     const val BASH_COMMAND_DISPLAY_MAX_LENGTH = 30

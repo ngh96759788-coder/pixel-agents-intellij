@@ -703,6 +703,7 @@ function attachWsClient(
         tokensUsed: evt.tokensUsed,
         budget: evt.budget,
         pct: evt.pct,
+        rateLimit: evt.rateLimit,
       })
     }
   })

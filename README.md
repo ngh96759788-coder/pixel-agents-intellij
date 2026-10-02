@@ -30,6 +30,8 @@ Ported from [Pixel Agents for VS Code](https://github.com/pablodelucca/pixel-age
 - **Persistent layouts** — your office design is saved across IDE restarts
 - **External session adoption** — automatically detects Claude Code sessions started outside the plugin
 - **Diverse characters** — 6 unique characters per theme with automatic palette diversity for sub-agents
+- **5-hour usage in the HUD** — shows your real 5-hour plan usage (`5h 14%`) when Claude Code's status line or Claude Desktop reports it, otherwise the weighted token count of the last 5 hours (`23.4M / 5h`)
+- **Fits narrow windows** — the bottom HUD drops detail step by step instead of overlapping the toolbar
 
 ## Requirements
 
@@ -150,6 +152,30 @@ Pixel Agents watches Claude Code's JSONL transcript files at `~/.claude/projects
 For async sub-agents (background Agent tool), the plugin also monitors separate JSONL files at `<session-id>/subagents/agent-<id>.jsonl` to track their independent tool activity.
 
 The webview runs a lightweight game loop with canvas rendering, BFS pathfinding, and a character state machine (idle -> walk -> type/read). Everything is pixel-perfect at integer zoom levels.
+
+## 5-Hour Usage
+
+The HUD's 5h chip uses the first available of:
+
+1. **Claude Code status line** — Claude Code passes `rate_limits` (5-hour and 7-day usage, Pro/Max plans) to your status line script. Add this to the script so Pixel Office can read it (requires `jq`):
+
+   ```bash
+   input=$(cat)   # skip if your script already reads stdin into a variable
+   rl=$(echo "$input" | jq -c 'select(.rate_limits.five_hour.used_percentage != null) | {updatedAt: (now * 1000 | floor), fiveHour: {usedPercentage: .rate_limits.five_hour.used_percentage, resetsAt: .rate_limits.five_hour.resets_at}, sevenDay: (.rate_limits.seven_day // null | if . then {usedPercentage: .used_percentage, resetsAt: .resets_at} else null end)}')
+   if [ -n "$rl" ]; then mkdir -p "$HOME/.pixel-agents" && printf '%s' "$rl" > "$HOME/.pixel-agents/rate-limits.json"; fi
+   ```
+
+   A reading stays valid until its 5-hour window resets.
+2. **Claude Desktop** — Desktop records usage samples every 15 minutes in its own `plan-usage-history.json`; a sample up to 20 minutes old is used. When both sources are valid, the more recent one wins.
+3. **Fallback** — the weighted token sum of the last 5 hours from `~/.claude/projects` (cache reads 0.10x, cache writes 1.25x).
+
+The chip reads like `5h 14% · 7d 23% (pace 35%)`. **Pace** is where 7-day usage would be now if the week's limit were spread evenly over its weekday hours (weekends add nothing). The chip turns amber when 7-day usage is ahead of the pace. Pace needs the 7-day reset time, which only the status line provides, so a Desktop-only reading shows `5h · 7d` without it. Hover the chip for the reset times and the source.
+
+**Optional: let Claude see it too.** `hooks/usage-pace.py` is a Claude Code `UserPromptSubmit` hook that reads the same cache and adds one line to your message only while 7-day usage is ahead of the pace (otherwise it adds nothing, so it costs no tokens). Copy it to `~/.claude/hooks/` and add to `~/.claude/settings.json`:
+
+```json
+{ "hooks": { "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "python3 $HOME/.claude/hooks/usage-pace.py", "timeout": 5 } ] } ] } }
+```
 
 ## Tech Stack
 

@@ -186,3 +186,21 @@ export const SPINNER_FLASH_PHASE_STEP_MS = 1300
 // it's clipped with an ellipsis (long Bash command lines, etc.).
 export const AMBIENT_LABEL_MAX_LEN = 28
 
+
+// ── Bottom HUD ──────────────────────────────────────────────
+export const HUD_SCALE = 1.6
+export const HUD_SCALE_COMPACT = 1
+/** Minimum horizontal clearance between the bottom-left toolbar and the HUD. */
+export const HUD_TOOLBAR_GAP_PX = 8
+/** Highest tier of `hudParts()`; at this tier the HUD is hidden. */
+export const HUD_MAX_TIER = 5
+/** How often the HUD re-reads the clock so the weekday pace keeps moving
+ *  between quota pushes. */
+export const HUD_CLOCK_TICK_MS = 60_000
+/** Length of the account's 7-day usage window (BEHAVIOR_SPEC §3). */
+export const QUOTA_SEVEN_DAY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+export const QUOTA_CHIP_BG = '#4a6a8a'
+export const QUOTA_CHIP_BORDER = '#2a3a4a'
+/** 7d usage is ahead of the weekday pace. Same amber as the approval badge. */
+export const QUOTA_CHIP_AHEAD_BG = '#c89a3a'
+export const QUOTA_CHIP_AHEAD_BORDER = '#6a522a'

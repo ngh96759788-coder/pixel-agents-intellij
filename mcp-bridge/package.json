@@ -1,11 +1,11 @@
 {
   "name": "pixel-agents-mcp-bridge",
-  "version": "0.8.6",
+  "version": "0.8.7",
   "description": "MCP server that surfaces Claude Desktop activity to the Pixel Office IntelliJ plugin via a shared JSONL log",
   "main": "server/index.mjs",
   "type": "module",
   "scripts": {
-    "build:server": "tsc && esbuild dist/index.js --bundle --platform=node --target=node20 --format=esm --outfile=server/index.mjs --banner:js=\"import { createRequire as _cr } from 'node:module'; const require = _cr(import.meta.url);\"",
+    "build:server": "tsc && esbuild dist/index.js --bundle --platform=node --target=node20 --format=esm --outfile=server/index.mjs --define:__BRIDGE_VERSION__=\\\"$npm_package_version\\\" --banner:js=\"import { createRequire as _cr } from 'node:module'; const require = _cr(import.meta.url);\"",
     "build:web": "(cd ../webview-ui && npm run build) && rm -rf web && mkdir -p web && cp -R ../dist/webview/. web/",
     "build": "npm run build:web && npm run build:server",
     "start": "node server/index.mjs",

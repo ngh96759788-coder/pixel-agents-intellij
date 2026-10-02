@@ -12,7 +12,7 @@ import {
   SPINNER_FLASH_PHASE_STEP_MS,
   AMBIENT_LABEL_MAX_LEN,
 } from '../../constants.js'
-import { contextWindowFor, formatTokens } from '../usage.js'
+import { contextWindowFor, formatTokens, parseModelId } from '../usage.js'
 import { spinnerVerbFor } from '../spinnerVerbs.js'
 
 /** Extra vertical lift (CSS px) above the character so the two-line popup
@@ -45,20 +45,14 @@ interface ToolOverlayProps {
   onCloseAgent: (id: number) => void
 }
 
-/** Extract the major.minor version from a Claude model id so the chip
- *  reads as e.g. "OPUS 4.7" instead of just "OPUS". Supports both the
- *  modern naming (`claude-opus-4-7`) and the older inverted form
- *  (`claude-3-5-sonnet-…`). Returns "" when no version is detectable so
- *  callers can skip the suffix gracefully. */
+/** Major.minor version of a Claude model id so the chip reads as e.g.
+ *  "OPUS 4.7" instead of just "OPUS". Shares `parseModelId` with the
+ *  context-window table, which is what keeps a trailing date suffix
+ *  (`claude-3-opus-20240229`) from rendering as the version. */
 function modelVersion(modelId: string): string {
-  const id = modelId.toLowerCase()
-  // Modern: tier-major-minor (claude-opus-4-7, claude-fable-5, claude-haiku-4-5, …)
-  const modern = /(?:opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d+))?/.exec(id)
-  if (modern) return modern[2] ? `${modern[1]}.${modern[2]}` : modern[1]
-  // Legacy: major-minor-tier (claude-3-5-sonnet, claude-3-opus, …)
-  const legacy = /(\d+)(?:-(\d+))?-(?:opus|sonnet|haiku)/.exec(id)
-  if (legacy) return legacy[2] ? `${legacy[1]}.${legacy[2]}` : legacy[1]
-  return ""
+  const { major, minor } = parseModelId(modelId)
+  if (major <= 0) return ''
+  return minor > 0 ? `${major}.${minor}` : String(major)
 }
 
 /** Map a Claude model id to a short tier label + accent color.

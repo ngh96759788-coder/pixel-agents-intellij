@@ -4,7 +4,8 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
-import java.util.concurrent.ConcurrentHashMap
+import com.intellij.ui.content.Content
+import java.util.IdentityHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -27,16 +28,40 @@ class TerminalDetector(
          *  other plugins doing the same). 3s is plenty for "user closed a
          *  terminal" UX and halves the EDT hops we cause. */
         private const val SCAN_INTERVAL_MS = 3000L
+
+        /**
+         * Folds one snapshot of open tabs into [tracked] and returns the names
+         * of every tab that disappeared. Tabs are keyed by identity, not by
+         * title: Claude Code rewrites the tab title (a spinner glyph prefix
+         * that changes every few seconds), and keying by title made every
+         * rename look like a close. Per tab only the first and the latest
+         * title are kept — the first is the name the plugin launched it under
+         * (`Pixel Agents #N`), which is what agents are matched by.
+         */
+        fun <K> applySnapshot(
+            tracked: MutableMap<K, Pair<String, String>>,
+            current: Map<K, String>,
+        ): List<Set<String>> {
+            for ((tab, title) in current) {
+                val seen = tracked[tab]
+                tracked[tab] = if (seen == null) title to title else seen.first to title
+            }
+            val closed = tracked.keys.filter { it !in current }
+            return closed.map { tab ->
+                val (first, last) = tracked.remove(tab)!!
+                setOf(first, last)
+            }
+        }
     }
 
     private val executor = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "PixelAgents-TerminalDetector").apply { isDaemon = true }
     }
     private var scanTimer: ScheduledFuture<*>? = null
-    private val trackedTerminals = ConcurrentHashMap.newKeySet<String>()
+    private val trackedTerminals: MutableMap<Content, Pair<String, String>> = IdentityHashMap()
     /** Latest snapshot the EDT helper produced. Background thread reads this
      *  without blocking — `null` until the first EDT pass completes. */
-    @Volatile private var cachedNames: Set<String>? = null
+    @Volatile private var cachedTabs: Map<Content, String>? = null
     @Volatile private var snapshotPending = false
 
     fun startScanning() {
@@ -59,22 +84,18 @@ class TerminalDetector(
         // the background thread waiting for the EDT — we work on data that's
         // at most one scan interval (3s) stale.
         requestSnapshotIfIdle()
-        val currentNames = cachedNames ?: return  // first pass hasn't landed yet
+        val currentTabs = cachedTabs ?: return  // first pass hasn't landed yet
 
         // On the very first scan tick, just seed the tracked set without
-        // emitting close events — those names existed before we started watching.
+        // emitting close events — those tabs existed before we started watching.
         if (trackedTerminals.isEmpty()) {
-            trackedTerminals.addAll(currentNames)
+            applySnapshot(trackedTerminals, currentTabs)
             return
         }
 
-        for (name in currentNames) trackedTerminals.add(name)
-
-        val closed = trackedTerminals.filter { it !in currentNames }
-        for (name in closed) {
-            trackedTerminals.remove(name)
-            LOG.info("Terminal closed: $name")
-            onTerminalClosed(name)
+        for (names in applySnapshot(trackedTerminals, currentTabs)) {
+            LOG.info("Terminal closed: ${names.joinToString(" / ")}")
+            for (name in names) onTerminalClosed(name)
         }
     }
 
@@ -94,19 +115,19 @@ class TerminalDetector(
         snapshotPending = true
         val app = ApplicationManager.getApplication()
         val collect = Runnable {
-            val names = mutableSetOf<String>()
+            val tabs = IdentityHashMap<Content, String>()
             try {
                 val toolWindow = com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
                     .getToolWindow("Terminal")
                 if (toolWindow != null) {
                     for (content in toolWindow.contentManager.contents) {
-                        content.displayName?.let { names.add(it) }
+                        content.displayName?.let { tabs[content] = it }
                     }
                 }
             } catch (e: Exception) {
                 LOG.debug("Terminal snapshot read failed", e)
             } finally {
-                cachedNames = names
+                cachedTabs = tabs
                 snapshotPending = false
             }
         }

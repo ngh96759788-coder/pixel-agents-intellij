@@ -6,7 +6,7 @@ import type { EditorRenderState, SelectionRenderState, DeleteButtonBounds, Rotat
 import { startGameLoop } from '../engine/gameLoop.js'
 import { renderFrame } from '../engine/renderer.js'
 import { TILE_SIZE, EditTool } from '../types.js'
-import { CAMERA_FOLLOW_LERP, CAMERA_FOLLOW_SNAP_THRESHOLD, ZOOM_MIN, ZOOM_MAX, ZOOM_SCROLL_THRESHOLD, PAN_MARGIN_FRACTION } from '../../constants.js'
+import { CAMERA_FOLLOW_LERP, CAMERA_FOLLOW_SNAP_THRESHOLD, PAN_MARGIN_FRACTION } from '../../constants.js'
 import { getCatalogEntry, isRotatable } from '../layout/furnitureCatalog.js'
 import { canPlaceFurniture, getWallPlacementRow } from '../editor/editorActions.js'
 import { vscode } from '../../vscodeApi.js'
@@ -25,7 +25,6 @@ interface OfficeCanvasProps {
   onDragMove: (uid: string, newCol: number, newRow: number) => void
   editorTick: number
   zoom: number
-  onZoomChange: (zoom: number) => void
   panRef: React.MutableRefObject<{ x: number; y: number }>
   /** Per-overlay always-on toggles from settings. When a flag is false the
    *  renderer falls back to hover/select-only for that overlay. */
@@ -37,7 +36,7 @@ interface OfficeCanvasProps {
   }
 }
 
-export function OfficeCanvas({ officeState, onClick, isEditMode, editorState, onEditorTileAction, onEditorEraseAction, onEditorSelectionChange, onDeleteSelected, onRotateSelected, onDragMove, editorTick: _editorTick, zoom, onZoomChange, panRef, overlayDefaults }: OfficeCanvasProps) {
+export function OfficeCanvas({ officeState, onClick, isEditMode, editorState, onEditorTileAction, onEditorEraseAction, onEditorSelectionChange, onDeleteSelected, onRotateSelected, onDragMove, editorTick: _editorTick, zoom, panRef, overlayDefaults }: OfficeCanvasProps) {
   // The game-loop render callback runs inside a useEffect closure whose
   // deps deliberately exclude `overlayDefaults` — re-mounting the rAF loop
   // every toggle flip would thrash the canvas. Mirror the prop into a ref
@@ -59,7 +58,6 @@ export function OfficeCanvas({ officeState, onClick, isEditMode, editorState, on
   // Right-click erase dragging
   const isEraseDraggingRef = useRef(false)
   // Zoom scroll accumulator for trackpad pinch sensitivity
-  const zoomAccumulatorRef = useRef(0)
 
   // Clamp pan so the map edge can't go past a margin inside the viewport
   const clampPan = useCallback((px: number, py: number): { x: number; y: number } => {
@@ -693,32 +691,21 @@ export function OfficeCanvas({ officeState, onClick, isEditMode, editorState, on
     }
   }, [isEditMode, officeState, screenToTile])
 
-  // Wheel: Ctrl+wheel to zoom, plain wheel/trackpad to pan
+  // Plain wheel / trackpad two-finger scroll pans. Ctrl/Cmd+wheel (and
+  // trackpad pinch, which arrives as ctrlKey wheel) is zoom, handled by the
+  // window-level listener in useEditorActions so it works over the HUD and
+  // toolbar too and can block the browser's own page zoom.
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
-      e.preventDefault()
-      if (e.ctrlKey || e.metaKey) {
-        // Accumulate scroll delta, step zoom when threshold crossed
-        zoomAccumulatorRef.current += e.deltaY
-        if (Math.abs(zoomAccumulatorRef.current) >= ZOOM_SCROLL_THRESHOLD) {
-          const delta = zoomAccumulatorRef.current < 0 ? 1 : -1
-          zoomAccumulatorRef.current = 0
-          const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom + delta))
-          if (newZoom !== zoom) {
-            onZoomChange(newZoom)
-          }
-        }
-      } else {
-        // Pan via trackpad two-finger scroll or mouse wheel
-        const dpr = window.devicePixelRatio || 1
-        officeState.cameraFollowId = null
-        panRef.current = clampPan(
-          panRef.current.x - e.deltaX * dpr,
-          panRef.current.y - e.deltaY * dpr,
-        )
-      }
+      if (e.ctrlKey || e.metaKey) return
+      const dpr = window.devicePixelRatio || 1
+      officeState.cameraFollowId = null
+      panRef.current = clampPan(
+        panRef.current.x - e.deltaX * dpr,
+        panRef.current.y - e.deltaY * dpr,
+      )
     },
-    [zoom, onZoomChange, officeState, panRef, clampPan],
+    [officeState, panRef, clampPan],
   )
 
   // Prevent default middle-click browser behavior (auto-scroll)

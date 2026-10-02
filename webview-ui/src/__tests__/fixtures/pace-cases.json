@@ -1,0 +1,15 @@
+{
+  "sevenDayResetsAt": "2026-10-07T21:00",
+  "cases": [
+    { "at": "2026-09-29T12:00", "pace": 0, "note": "before the window starts" },
+    { "at": "2026-09-30T21:00", "pace": 0, "note": "window start, Wed 21:00" },
+    { "at": "2026-10-01T00:00", "pace": 2.5, "note": "3 of 120 weekday hours" },
+    { "at": "2026-10-02T15:00", "pace": 35, "note": "Fri 15:00, 42 of 120" },
+    { "at": "2026-10-03T12:00", "pace": 42.5, "note": "Saturday adds nothing" },
+    { "at": "2026-10-04T23:30", "pace": 42.5, "note": "nor does Sunday" },
+    { "at": "2026-10-05T09:00", "pace": 50, "note": "Mon 09:00, half the weekday hours" },
+    { "at": "2026-10-06T18:00", "pace": 77.5, "note": "Tue 18:00" },
+    { "at": "2026-10-07T21:00", "pace": 100, "note": "reset" },
+    { "at": "2026-10-08T09:00", "pace": 100, "note": "after reset" }
+  ]
+}

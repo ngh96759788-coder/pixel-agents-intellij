@@ -9,7 +9,7 @@ import type { ExpandDirection } from '../office/editor/editorActions.js'
 import { getCatalogEntry, getRotatedType, getToggledType } from '../office/layout/furnitureCatalog.js'
 import { defaultZoom } from '../office/toolUtils.js'
 import { vscode } from '../vscodeApi.js'
-import { LAYOUT_SAVE_DEBOUNCE_MS, ZOOM_MIN, ZOOM_MAX } from '../constants.js'
+import { LAYOUT_SAVE_DEBOUNCE_MS, ZOOM_MIN, ZOOM_MAX, ZOOM_SCROLL_THRESHOLD } from '../constants.js'
 
 export interface EditorActions {
   isEditMode: boolean
@@ -357,6 +357,25 @@ export function useEditorActions(
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  // Ctrl/Cmd+wheel zoom, like Chrome's page zoom but applied to the office.
+  // Registered on window with passive:false: React's onWheel is passive, so
+  // preventDefault there is ignored and the browser (Chrome widget, JCEF)
+  // zoomed the whole page — buttons and HUD included — alongside the office.
+  const wheelAccumulatorRef = useRef(0)
+  useEffect(() => {
+    const handler = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      wheelAccumulatorRef.current += e.deltaY
+      if (Math.abs(wheelAccumulatorRef.current) < ZOOM_SCROLL_THRESHOLD) return
+      const step = wheelAccumulatorRef.current < 0 ? 1 : -1
+      wheelAccumulatorRef.current = 0
+      setZoom((z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z + step)))
+    }
+    window.addEventListener('wheel', handler, { passive: false })
+    return () => window.removeEventListener('wheel', handler)
   }, [])
 
   const handleDragMove = useCallback((uid: string, newCol: number, newRow: number) => {

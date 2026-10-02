@@ -1,6 +1,9 @@
 package com.pixelagents.intellij
 
 import com.google.gson.Gson
+import com.intellij.notification.NotificationAction
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
@@ -17,7 +20,13 @@ import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.awt.BorderLayout
+import javax.swing.JButton
 import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.SwingConstants
 
 class PixelAgentsToolWindowFactory : ToolWindowFactory, DumbAware {
 
@@ -39,7 +48,7 @@ class PixelAgentsToolWindowFactory : ToolWindowFactory, DumbAware {
         try {
             val panel = PixelAgentsPanel(project)
             val content = toolWindow.contentManager.factory.createContent(
-                panel.browser.component, "Pixel Agents", false
+                panel.component, "Pixel Agents", false
             )
             toolWindow.contentManager.addContent(content)
             Disposer.register(content, panel)
@@ -61,8 +70,20 @@ class PixelAgentsPanel(
         private val LOG = Logger.getInstance(PixelAgentsPanel::class.java)
     }
 
-    val browser: JBCefBrowser
-    private val bridge: WebviewBridge
+    /** Hosts the browser component. The browser itself can be replaced when
+     *  JCEF dies, so the tool window holds this wrapper rather than it. */
+    val component = JPanel(BorderLayout())
+    @Volatile private lateinit var browser: JBCefBrowser
+    @Volatile private lateinit var bridge: WebviewBridge
+    private val webviewWatchdog = WebviewWatchdog(
+        staleMs = Constants.WEBVIEW_STALE_MS,
+        recoveryWaitMs = Constants.WEBVIEW_RECOVERY_WAIT_MS,
+    )
+    @Volatile private var watchdogTickPending = false
+    @Volatile private var disposed = false
+    private val watchdogExecutor = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "PixelAgents-WebviewWatchdog").apply { isDaemon = true }
+    }
     private val timerManager: TimerManager
     private lateinit var agentManager: AgentManager
     private val fileWatcher: FileWatcher
@@ -100,11 +121,7 @@ class PixelAgentsPanel(
 
     init {
         LOG.info("Initializing PixelAgentsPanel")
-        browser = JBCefBrowser()
-
-        bridge = WebviewBridge(browser) { message ->
-            handleWebviewMessage(message)
-        }
+        attachNewBrowser()
 
         timerManager = TimerManager(
             sendToWebview = { type, payload -> bridge.sendToWebview(type, payload) },
@@ -205,24 +222,191 @@ class PixelAgentsPanel(
             LOG.info("Loading webview from: $url (OS DPR=$osScale)")
             lastLoadedUrl = url
             browser.loadURL(url)
-
-            // Reload the webview when the user drags the IDE window to a different
-            // monitor or unplugs/replugs a display. JCEF OSR caches a backbuffer at
-            // the DPR of the GraphicsConfiguration it was created on; a fresh load
-            // is the simplest way to make it pick up the new DPR. We also tell the
-            // JS side via a CustomEvent so the canvas can resize immediately
-            // (without waiting for the reload round trip) for the common case
-            // where the JCEF backbuffer is still usable.
-            displayWatcher = DisplayChangeWatcher(browser.component) { _ ->
-                notifyDprChangeToJs()
-                reloadWebview()
-            }
-            displayWatcher?.start()
+            watchDisplayChanges()
+            watchdogExecutor.scheduleWithFixedDelay(
+                { checkWebviewAlive() },
+                Constants.WEBVIEW_PING_INTERVAL_MS,
+                Constants.WEBVIEW_PING_INTERVAL_MS,
+                TimeUnit.MILLISECONDS,
+            )
         } else {
             LOG.warn("Failed to extract webview resources, showing error page")
             browser.loadHTML("<html><body><h1>Failed to load Pixel Agents webview</h1></body></html>")
         }
     }
+
+    /** Creates the browser and its JS bridge and puts the browser in [component].
+     *  Used at start-up and again when a dead JCEF has to be replaced. */
+    private fun attachNewBrowser() {
+        val newBrowser = JBCefBrowser()
+        val newBridge = WebviewBridge(
+            browser = newBrowser,
+            onMessage = { message -> handleWebviewMessage(message) },
+            onAlive = { webviewAlive() },
+            onRenderProcessGone = { reason -> onRenderProcessGone(reason) },
+        )
+        browser = newBrowser
+        bridge = newBridge
+        component.removeAll()
+        component.add(newBrowser.component, BorderLayout.CENTER)
+        component.revalidate()
+        component.repaint()
+    }
+
+    // Reload the webview when the user drags the IDE window to a different
+    // monitor or unplugs/replugs a display. JCEF OSR caches a backbuffer at
+    // the DPR of the GraphicsConfiguration it was created on; a fresh load
+    // is the simplest way to make it pick up the new DPR. We also tell the
+    // JS side via a CustomEvent so the canvas can resize immediately
+    // (without waiting for the reload round trip) for the common case
+    // where the JCEF backbuffer is still usable.
+    private fun watchDisplayChanges() {
+        displayWatcher?.dispose()
+        displayWatcher = DisplayChangeWatcher(browser.component) { _ ->
+            notifyDprChangeToJs()
+            reloadWebview("display change")
+        }.also { it.start() }
+    }
+
+    private fun webviewAlive() {
+        synchronized(webviewWatchdog) { webviewWatchdog.onAlive() }
+    }
+
+    /** Runs the watchdog on the EDT, one tick at a time. While the EDT is
+     *  frozen no tick runs and no ping goes out, so a frozen IDE cannot pile up
+     *  reload/recreate/give-up decisions that fire the moment it unfreezes. */
+    private fun checkWebviewAlive() {
+        if (disposed || watchdogTickPending) return
+        watchdogTickPending = true
+        ApplicationManager.getApplication().invokeLater({
+            try {
+                tickWebviewWatchdog()
+            } finally {
+                watchdogTickPending = false
+            }
+        }, com.intellij.openapi.application.ModalityState.any())
+    }
+
+    private fun tickWebviewWatchdog() {
+        if (disposed) return
+        try {
+            val now = System.currentTimeMillis()
+            val action = synchronized(webviewWatchdog) { webviewWatchdog.tick(now) }
+            when (action) {
+                WebviewWatchdog.Action.PING -> if (bridge.ping()) {
+                    synchronized(webviewWatchdog) { webviewWatchdog.onPingDelivered(now) }
+                }
+                WebviewWatchdog.Action.RELOAD -> {
+                    LOG.warn("Webview silent for ${Constants.WEBVIEW_STALE_MS / 1000}s, reloading")
+                    reloadWebview("webview silent")
+                }
+                WebviewWatchdog.Action.RECREATE -> {
+                    LOG.warn("Webview still silent after reloading, recreating the browser")
+                    recreateBrowser()
+                }
+                WebviewWatchdog.Action.GIVE_UP -> {
+                    LOG.warn("Webview still silent after recreating the browser; JCEF looks gone, asking for an IDE restart")
+                    showJcefGone()
+                }
+                WebviewWatchdog.Action.IDLE -> {}
+            }
+        } catch (e: Exception) {
+            LOG.warn("Webview watchdog tick failed", e)
+        }
+    }
+
+    private fun onRenderProcessGone(reason: String) {
+        if (disposed) return
+        LOG.warn("Webview renderer process terminated: $reason")
+        val action = synchronized(webviewWatchdog) { webviewWatchdog.onRenderProcessGone(System.currentTimeMillis()) }
+        when (action) {
+            WebviewWatchdog.Action.RELOAD -> reloadWebview("renderer terminated")
+            WebviewWatchdog.Action.RECREATE -> recreateBrowser()
+            WebviewWatchdog.Action.GIVE_UP -> showJcefGone()
+            WebviewWatchdog.Action.PING, WebviewWatchdog.Action.IDLE -> {}
+        }
+    }
+
+    /** Shown in place of the dead browser once recovery has failed. The IDE
+     *  does not restart its JCEF process, so a restart is the real fix; "Try
+     *  again" covers the cases where recreating does help. */
+    private fun showJcefGone() {
+        ApplicationManager.getApplication().invokeLater({
+            if (disposed) return@invokeLater
+            val message = JLabel(
+                "<html><center>The IDE's built-in browser (JCEF) stopped, so Pixel Agents cannot draw.<br>" +
+                    "Restarting the IDE brings it back.</center></html>",
+                SwingConstants.CENTER,
+            )
+            val restart = JButton("Restart IDE").apply {
+                addActionListener { ApplicationManager.getApplication().restart() }
+            }
+            val retry = JButton("Try again").apply {
+                addActionListener {
+                    synchronized(webviewWatchdog) { webviewWatchdog.onManualRetry(System.currentTimeMillis()) }
+                    recreateBrowser()
+                }
+            }
+            val buttons = JPanel().apply {
+                add(restart)
+                add(retry)
+            }
+            val fallback = JPanel(BorderLayout()).apply {
+                add(message, BorderLayout.CENTER)
+                add(buttons, BorderLayout.SOUTH)
+            }
+            // Detaching the browser looks like a display change to the watcher,
+            // which would reload the dead browser; stop it first.
+            displayWatcher?.dispose()
+            displayWatcher = null
+            component.removeAll()
+            component.add(fallback, BorderLayout.CENTER)
+            component.revalidate()
+            component.repaint()
+            NotificationGroupManager.getInstance().getNotificationGroup("Pixel Agents")
+                .createNotification(
+                    "Pixel Agents stopped drawing",
+                    "The IDE's built-in browser (JCEF) stopped. Restart the IDE to bring the office back.",
+                    NotificationType.WARNING,
+                )
+                .addAction(NotificationAction.createSimpleExpiring("Restart IDE") {
+                    ApplicationManager.getApplication().restart()
+                })
+                .notify(project)
+        }, com.intellij.openapi.application.ModalityState.any())
+    }
+
+    /** Replaces the browser with a new one. A reload cannot help once the whole
+     *  JCEF process is gone (seen on 2026.1: `cef_server` exited while the IDE
+     *  kept running), because the old browser has nothing left to talk to. */
+    private fun recreateBrowser() {
+        val baseUrl = lastLoadedUrl ?: return
+        ApplicationManager.getApplication().invokeLater({
+            if (disposed) return@invokeLater
+            val oldBrowser = browser
+            val oldBridge = bridge
+            try {
+                attachNewBrowser()
+                lastNotifiedActive = null
+                val url = "${baseUrl.substringBefore('?')}?dpr=${currentOsScale()}&_cb=${System.currentTimeMillis()}"
+                lastLoadedUrl = url
+                browser.loadURL(url)
+                watchDisplayChanges()
+                LOG.info("Recreated the webview browser")
+            } catch (e: Exception) {
+                LOG.warn("Recreating the webview browser failed", e)
+            }
+            try {
+                oldBridge.dispose()
+                oldBrowser.dispose()
+            } catch (e: Exception) {
+                LOG.warn("Disposing the dead webview browser failed", e)
+            }
+        }, com.intellij.openapi.application.ModalityState.any())
+    }
+
+    private fun currentOsScale(): Double = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
+        .defaultScreenDevice.defaultConfiguration.defaultTransform.scaleX
 
     /** Push a tool-window visibility hint into the webview. gameLoop pauses
      *  while inactive, saving CPU when the user has the panel collapsed. */
@@ -252,18 +436,19 @@ class PixelAgentsPanel(
     /** Recompute the OS DPR and reload the webview with a fresh cache-buster.
      *  Re-binds JCEF OSR to the current GraphicsConfiguration so its backbuffer
      *  picks up the new DPR. */
-    private fun reloadWebview() {
+    private fun reloadWebview(reason: String) {
         val baseUrl = lastLoadedUrl ?: return
         ApplicationManager.getApplication().invokeLater({
+            if (disposed) return@invokeLater
             try {
-                val osScale = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
-                    .defaultScreenDevice.defaultConfiguration.defaultTransform.scaleX
+                val osScale = currentOsScale()
                 // Strip any prior query and rebuild — the URL fragment holds the path,
                 // we just refresh the dpr + cache buster.
                 val base = baseUrl.substringBefore('?')
                 val url = "$base?dpr=$osScale&_cb=${System.currentTimeMillis()}"
                 lastLoadedUrl = url
-                LOG.info("Reloading webview after display change: dpr=$osScale")
+                lastNotifiedActive = null
+                LOG.info("Reloading webview ($reason): dpr=$osScale")
                 browser.loadURL(url)
             } catch (e: Exception) {
                 LOG.warn("reloadWebview failed", e)
@@ -565,6 +750,11 @@ class PixelAgentsPanel(
         // 5. Send existing agents (empty on fresh start; fileWatcher may adopt running terminals)
         agentManager.sendExistingAgents()
 
+        // A reloaded or recreated page starts out active; tell it the real
+        // tool-window visibility so a hidden panel does not keep animating.
+        com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
+            .getToolWindow("Pixel Agents")?.let { notifyActiveToJs(it.isVisible) }
+
         // Refresh the 5h token HUD immediately on webview (re)load — a fresh
         // webview starts at 0 and would otherwise wait up to a minute for the
         // next scheduled tick. No-op before infrastructure start.
@@ -737,6 +927,8 @@ class PixelAgentsPanel(
     }
 
     override fun dispose() {
+        disposed = true
+        watchdogExecutor.shutdownNow()
         displayWatcher?.dispose()
         if (::terminalDetector.isInitialized) terminalDetector.dispose()
         worktreeDetector?.dispose()

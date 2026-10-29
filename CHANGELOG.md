@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.7
+
+### IntelliJ 2026.2.3에서 툴윈도우가 비던 문제
+- 2026.2.3(262.10968)부터 JCEF가 플랫폼 본체에서 번들 플러그인 「Web Browser (JCEF)」(`com.intellij.modules.jcef`)로 옮겨졌다. 플러그인은 그 플러그인에 의존한다고 선언하지 않아서 툴윈도우를 만들 때 `NoClassDefFoundError: com/intellij/ui/jcef/JBCefApp`가 나고 화면에는 "Nothing to show"만 남았다. 2026.2 첫 빌드(262.8665)까지는 JCEF가 본체에 있어서 문제가 없었다
+- `com.intellij.modules.jcef`에 선택 의존성을 추가했다. 2024.2·2025.2에는 이 id가 없어서 필수 의존성으로 넣으면 플러그인이 아예 로드되지 않는다
+- Plugin Verifier는 고치기 전 빌드도 262.10968에서 Compatible로 판정했다. 그래서 2026.2.3 샌드박스에서 툴윈도우를 직접 열어 확인했다. 고친 빌드는 툴윈도우 생성과 `webviewReady`까지 가고, 의존성 한 줄을 빼면 같은 예외가 다시 난다
+
 ## 1.0.6 (+ mcp-bridge 0.8.7)
 
 ### 5h 토큰 칩을 가중합으로 (BEHAVIOR_SPEC §3 변경 — 사용자 승인 2026-09-21)

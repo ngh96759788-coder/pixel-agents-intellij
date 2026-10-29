@@ -48,6 +48,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>1.0.7</h3>
+<ul>
+  <li>Fixed an empty Pixel Agents tool window ("Nothing to show") on IntelliJ 2026.2.3 and later. These builds moved the embedded browser (JCEF) out of the platform core into the bundled <i>Web Browser (JCEF)</i> plugin, so the plugin could no longer load <code>JBCefApp</code>. The plugin now declares an optional dependency on <code>com.intellij.modules.jcef</code>; IDEs without that plugin (2024.2&ndash;2026.1) are unaffected</li>
+</ul>
+
 <h3>1.0.6</h3>
 <p><b>Bottom HUD token readout</b></p>
 <ul>
@@ -167,6 +172,7 @@
 
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.terminal</depends>
+    <depends optional="true" config-file="pixel-agents-jcef.xml">com.intellij.modules.jcef</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow id="Pixel Agents"
